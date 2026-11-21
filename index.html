@@ -49,7 +49,8 @@
   .scroll { overflow-x:auto; }
   #err { color:var(--bad); font-size:14px; white-space:pre-wrap; margin-top:10px; }
   .note { color:var(--dim); font-size:13px; line-height:1.6; margin-top:8px; }
-  .bar { display:flex; gap:8px; margin-top:10px; }
+  .bar { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  td button.small { padding:4px 10px; font-size:12px; }
   .checks { display:flex; gap:8px; margin-top:8px; }
   .checks span { flex:1; text-align:center; padding:7px 4px; border-radius:8px; font-size:13px; border:1px solid var(--line); color:var(--dim); }
   .checks span.ok { border-color:var(--accent); color:var(--accent); }
@@ -85,6 +86,7 @@
     <div class="row"><label for="cVoice">語音播報</label><input id="cVoice" type="checkbox" checked></div>
     <div class="row"><label for="cSetup">站位檢查（揮桿前提醒）</label><input id="cSetup" type="checkbox" checked></div>
     <div class="row"><label for="cPause">檢查頂點停頓</label><input id="cPause" type="checkbox" checked></div>
+    <div class="row"><label for="cRecord">錄下每一球（可分享出去請人分析）</label><input id="cRecord" type="checkbox" checked></div>
   </div>
 
   <div class="btns">
@@ -93,7 +95,7 @@
     <input id="file" type="file" accept="video/*" class="hide">
   </div>
   <div id="err"></div>
-  <p class="note">影像只在這支手機上處理，不會上傳。第一次開啟需要從本站下載偵測模型（約 15 MB）。</p>
+  <p class="note">影像只在這支手機上處理，不會上傳。錄下的影片只暫存在這個網頁裡，關掉就消失，除非你自己按分享。第一次開啟需要從本站下載偵測模型（約 15 MB）。</p>
 </section>
 
 <section id="live" class="hide">
@@ -119,6 +121,8 @@
   </div>
   <div class="bar">
     <button id="bCopy" class="ghost small">複製紀錄</button>
+    <button id="bClips" class="ghost small">分享影片</button>
+    <button id="bData" class="ghost small">匯出偵測資料</button>
     <button id="bStop" class="ghost small">結束</button>
   </div>
   <div id="err2" style="color:var(--bad);font-size:14px;white-space:pre-wrap;margin-top:10px"></div>
@@ -200,18 +204,37 @@
     impactTol: 0.10,      // 回到站位附近多近算通過擊球區
     postWait: 1.0,        // 擊球後再收集多久（收桿）
     minFollow: 0.08,      // 擊球後雙手至少再離開多少才算有送桿
-    minSpeed: 1.1         // 擊球區雙手速度低於此值視為慢動作，不分析
+    minSpeed: 1.1,        // 擊球區雙手速度低於此值視為慢動作，不分析
+    minSwingTime: 0.35    // 從離開站位到回到擊球區至少要這麼久，否則視為誤判
   };
 
   function Tracker(opts) {
     this.o = Object.assign({}, DEFAULTS, opts || {});
-    this.buf = []; this.state = 'idle'; this.addr = null; this.handlers = {};
+    this.buf = []; this.votes = []; this.pa = null; this.pb = null; this.state = 'idle'; this.addr = null; this.handlers = {};
     this.blockUntil = -1e9; this.lastT = -1e9;
   }
   Tracker.prototype.on = function (ev, fn) { this.handlers[ev] = fn; return this; };
   Tracker.prototype._emit = function (ev, payload) { if (this.handlers[ev]) this.handlers[ev](payload); };
   Tracker.prototype._set = function (s) { if (s !== this.state) { this.state = s; this._emit('state', s); } };
-  Tracker.prototype.reset = function () { this.buf = []; this.addr = null; this._set('idle'); };
+  Tracker.prototype.reset = function () { this.buf = []; this.pa = null; this.pb = null; this.addr = null; this._set('idle'); };
+
+  /* 拍攝角度：用整個練習過程累積的站位資料決定，不會每一球各自判斷而跳來跳去 */
+  Tracker.prototype._vote = function (m) {
+    if (m.S / Math.max(1e-6, m.ank.y - m.hip.y) > LIMITS.uprightStanding) return;   // 只是站著，不列入
+    this.votes.push(Math.max(m.shW, m.hipW) / m.S);
+    if (this.votes.length > 15) this.votes.shift();
+  };
+  Tracker.prototype.view = function (m) {
+    if (this.o.view === 'dtl' || this.o.view === 'face') return this.o.view;
+    if (this.votes.length) return median(this.votes) < VIEW_SPLIT ? 'dtl' : 'face';
+    return m ? viewOf(m) : 'dtl';
+  };
+  function isSpike(a, b, c) {
+    var S = b.ank.y - b.head.y; if (!(S > 0.15)) return false;
+    var d1 = dist(b.hands, a.hands) / S, d2 = dist(b.hands, c.hands) / S, d3 = dist(a.hands, c.hands) / S;
+    return d1 > 0.12 && d2 > 0.12 && d3 < 0.5 * Math.min(d1, d2);
+  }
+  function med3(a, b, c) { return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c)); }
 
   Tracker.prototype._stillWindow = function (t) {
     var o = this.o, buf = this.buf, w = [];
@@ -226,7 +249,8 @@
     if (m.hands.y < m.hip.y - 0.10 * m.S) { this.why = 'handsHigh'; return null; }    // 手要在腰部以下
     if (m.wristGap > 0.16 * m.S) { this.why = 'grip'; return null; }                  // 雙手要靠在一起（握著球桿）
     this.why = 'moving';
-    for (var j = 0; j < w.length; j++) if (dist(w[j].hands, m.hands) > o.stillTol * m.S) return null;
+    var out = 0, allow = w.length >= 7 ? 1 : 0;   // 畫面夠多時，容許一格不穩
+    for (var j = 0; j < w.length; j++) if (dist(w[j].hands, m.hands) > o.stillTol * m.S && ++out > allow) return null;
     this.why = '';
     return m;
   };
@@ -237,7 +261,12 @@
     if (!lm) { if (this.state === 'idle') this._emit('hint', 'person'); return; }
     var f = feat(t, lm, aspect || 1);
     if (!f.ok) { if (this.state === 'idle') this._emit('hint', f.miss || 'person'); return; }
-    this.feedFeat(f);
+    // 去跳點：晚一格處理。若某一格的雙手突然跳得很遠、下一格又跳回原處，就是關節點誤判，丟掉那一格
+    var pa = this.pa, pb = this.pb;
+    if (!pb) { this.pb = f; return; }
+    if (pa && f.t - pa.t < 0.35 && isSpike(pa, pb, f)) { this.pb = f; this.spikes = (this.spikes || 0) + 1; return; }
+    this.pa = pb; this.pb = f;
+    this.feedFeat(pb);
   };
   Tracker.prototype.feedFeat = function (f) {
     var t = f.t, buf = this.buf, o = this.o;
@@ -250,7 +279,8 @@
       if (m) {
         var first = this.state === 'idle';
         this.addr = m; this._set('address');
-        this._emit(first ? 'address' : 'addressUpdate', addressReport(m));
+        if (first) this._vote(m);
+        this._emit(first ? 'address' : 'addressUpdate', addressReport(m, this.view(m)));
         return;
       }
       if (this.state === 'idle') this._emit('hint', this.why);
@@ -274,11 +304,14 @@
       }
       if (sw.maxRise >= o.minRise * S) {
         if (t > sw.tTop && dist(f.hands, a.hands) < o.impactTol * S) {
-          this._set('post'); sw.tImp = t; sw.follow = 0;
+          if (t - sw.t0 < o.minSwingTime) {
+            // 雙手不可能這麼快離開又回來：是關節點誤判（跳點），當作沒發生
+            this._set('address'); this.sw = null;
+          } else { this._set('post'); sw.tImp = t; sw.follow = 0; }
         }
       } else {
         var m2 = this._stillWindow(t);          // 只是晃桿，又回到站位
-        if (m2) { this.addr = m2; this._set('address'); this._emit('addressUpdate', addressReport(m2)); }
+        if (m2) { this.addr = m2; this._set('address'); this._emit('addressUpdate', addressReport(m2, this.view(m2))); }
       }
       return;
     }
@@ -290,8 +323,10 @@
         var frames = buf.filter(function (x) { return x.t >= a.t - 1.0; });
         this.blockUntil = t; this.addr = null; this._set('idle');
         if (s2.follow >= o.minFollow * S) {
-          var rep = analyzeSwing(frames, a, s2, o.view);
+          this._vote(a);
+          var rep = analyzeSwing(frames, a, s2, this.view(a));
           if (!rep) this._emit('skip', 'fail');
+          else if (rep.down < 0.08 || rep.backswing + rep.pause + rep.down < 0.45) this._emit('skip', 'unstable');
           else if (rep.hipMove > 0.08 || Math.abs(rep.headDrop) > 0.15) this._emit('skip', 'moved');
           else if (rep.peakSpeed < o.minSpeed) this._emit('skip', 'slow');
           else this._emit('swing', rep);
@@ -304,6 +339,7 @@
 
   /* 影片結束時呼叫：把還在等收桿的那一球結算掉 */
   Tracker.prototype.flush = function () {
+    if (this.pb) { var p = this.pb; this.pb = null; this.pa = p; this.feedFeat(p); }
     if (this.state !== 'post' || !this.buf.length) return;
     var last = this.buf[this.buf.length - 1];
     this._flushing = true; this.buf.pop(); this.feedFeat(last); this._flushing = false;
@@ -314,9 +350,9 @@
     return m.kneeLv > m.kneeRv ? m.kneeL : m.kneeR;
   }
   function viewOf(m) { return (Math.max(m.shW, m.hipW) / m.S) < VIEW_SPLIT ? 'dtl' : 'face'; }
-  function addressReport(m) {
+  function addressReport(m, view) {
     var ballDir = (m.hands.x - m.hip.x) >= 0 ? 1 : -1;
-    return { view: viewOf(m), knee: chooseKnee(m), tilt: tiltOf(m, ballDir), S: m.S,
+    return { view: view || viewOf(m), knee: chooseKnee(m), tilt: tiltOf(m, ballDir), S: m.S,
       upright: m.S / Math.max(1e-6, m.ank.y - m.hip.y),                // 耳到腳踝÷髖到腳踝：站直約 2.0，站位時較小
       stance: Math.abs(m.lAnkX - m.rAnkX) / Math.max(1e-6, m.shW) };   // 雙腳距離÷肩寬（正面才有意義）
   }
@@ -359,6 +395,8 @@
     // 擊球：頂點之後，雙手最接近站位位置的那一格
     var iLive = n - 1;
     for (i = 0; i < n; i++) if (frames[i].t >= sw.tImp) { iLive = i; break; }
+    // 找頂點時用三格中位數，避免單一畫面的跳點被當成頂點（頂點附近雙手很慢，濾波不會失真）
+    rise = d.map(function (v, k) { return (k > 0 && k < n - 1) ? med3(d[k - 1], v, d[k + 1]) : v; });
     var iTopRaw = iGo;
     for (i = iGo; i <= iLive; i++) if (rise[i] > rise[iTopRaw]) iTopRaw = i;
     var iImp = iTopRaw + 1 < n ? iTopRaw + 1 : iTopRaw;
@@ -392,6 +430,12 @@
     while (iHalf > iTopRaw && d[iHalf] < 0.5 * d[iTopRaw]) iHalf--;
     rep.hit = tImp - frames[iHalf].t;                            // 雙手走完下桿後半段花的時間
     rep.peakSpeed = pk;                                          // 擊球區雙手最快速度（身體尺度／秒）
+    // 下桿平均速度：頂點到擊球的直線距離÷時間。單一畫面的跳點影響不到它
+    var iTopEnd = p1, tDown = tImp - frames[iTopEnd].t;
+    rep.avgDown = tDown > 0 ? (dist(frames[iTopEnd].hands, frames[iImp].hands) / S) / tDown : 0;
+    var sp = []; for (i = 1; i < n; i++) if (frames[i].t >= tImp - 0.3 && frames[i].t <= tImp + 0.15) sp.push(speed(i));
+    sp.sort(function (x, y) { return y - x; });
+    rep.speed3 = sp.length >= 3 ? sp[2] : (sp[sp.length - 1] || 0);   // 第三快的那一格：真的揮桿會連續好幾格都快
     // 收桿
     var fin = frames.filter(function (f) { return f.t >= tImp + 0.7; });
     if (!fin.length) fin = frames.slice(-2);
@@ -506,6 +550,8 @@
   var LIB = 'vendor/pose/';
   var video = $('video'), canvas = $('view'), ctx = canvas.getContext('2d');
   var pose = null, tracker = null, running = false, busy = false, mode = 'camera', stream = null, wake = null;
+  var TSCALE = +(qs.get('tscale') || 1) || 1;
+  var rawBuf = [], dataLog = [], clips = [], rec = { cur: null, mime: '' }, lockT = 0, lastFps = 0;
   var frameT = 0, fpsN = 0, fpsT0 = 0, slowN = 0, lastLm = null, history = [], cfg = {}, audio = null, voices = [];
   var LINKS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[28,30],[30,32],[0,7],[0,8]];
 
@@ -514,7 +560,7 @@
   window.addEventListener('unhandledrejection', function (e) { showErr(e.reason); });
 
   /* ---------- 設定 ---------- */
-  var FIELDS = { cView: 'view', cFocus: 'focus', cCam: 'cam', cHeight: 'heightCm', cModel: 'model', cVoice: 'voice', cPause: 'pause', cSetup: 'setup' };
+  var FIELDS = { cView: 'view', cFocus: 'focus', cCam: 'cam', cHeight: 'heightCm', cModel: 'model', cVoice: 'voice', cPause: 'pause', cSetup: 'setup', cRecord: 'record' };
   function loadCfg() {
     try { var s = JSON.parse(localStorage.getItem('swingcfg') || '{}');
       Object.keys(FIELDS).forEach(function (id) { var k = FIELDS[id], el = $(id); if (s[k] == null) return;
@@ -573,7 +619,7 @@
   function setPill(text, cls) { var p = $('pill'); if (p.textContent !== text) p.textContent = text; if (p.className !== (cls || '')) p.className = cls || ''; }
   function setStatus(text) { var e = $('statusLine'); if (e.textContent !== text) e.textContent = text; }
   // 相機用實際時間；分析影片檔時用影片本身的時間，播放速度不影響判斷
-  var nowS = function () { return mode === 'file' ? frameT : performance.now() / 1000; };
+  var nowS = function () { return mode === 'file' ? frameT : performance.now() / 1000 / TSCALE; };
 
   /* 揮桿前的三個關卡：0 全身入鏡、1 雙手握桿、2 站位鎖定 */
   var CK = ['全身入鏡', '雙手握桿', '站位鎖定'];
@@ -598,7 +644,7 @@
     moving: ['雙手就位，站好不動', '', 2, false],
     wait: ['握桿站好不動', '', 2, false]
   };
-  var SKIPS = { slow: '動作太慢，這次不算', nofollow: '沒有送桿，這次不算', moved: '身體移動太多，這次不算', noimpact: '沒有偵測到擊球，這次不算', fail: '量測失敗，這次不算' };
+  var SKIPS = { slow: '動作太慢，這次不算', nofollow: '沒有送桿，這次不算', moved: '身體移動太多，這次不算', noimpact: '沒有偵測到擊球，這次不算', unstable: '偵測不穩定，這次不算', fail: '量測失敗，這次不算' };
   var hint = { code: '', since: 0, lastVoice: -1e9 }, everLocked = false, framedSaid = false;
   var ad = { key: '', since: 0, spoken: '', lastVoice: -1e9, grip: false };
 
@@ -635,6 +681,58 @@
     }
   }
 
+  /* ---------- 每一球的錄影與偵測資料 ---------- */
+  function pickMime() {
+    if (!window.MediaRecorder) return '';
+    var c = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    for (var i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (e) {} }
+    return '';
+  }
+  function recStart() {
+    recStop(null);
+    if (!cfg.record || mode !== 'camera' || !stream || !window.MediaRecorder) return;
+    try {
+      var opt = { videoBitsPerSecond: 2500000 }; if (rec.mime) opt.mimeType = rec.mime;
+      var mr = new MediaRecorder(stream, opt), chunks = [], me = { mr: mr, keep: null, t0: performance.now() };
+      mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      mr.onstop = function () {
+        if (!me.keep) return;
+        var type = (mr.mimeType || rec.mime || 'video/mp4').split(';')[0];
+        clips.push({ n: me.keep.n, skip: me.keep.skip, blob: new Blob(chunks, { type: type }), ext: type.indexOf('webm') >= 0 ? 'webm' : 'mp4' });
+        // 只留最近 15 球和最近 3 次「不算」的片段，避免占太多記憶體
+        var sw = clips.filter(function (c) { return !c.skip; }), sk = clips.filter(function (c) { return c.skip; });
+        clips = sw.slice(-15).concat(sk.slice(-3));
+        renderTable();
+      };
+      mr.start(); rec.cur = me;
+    } catch (e) { rec.cur = null; }
+  }
+  function recStop(keep) {
+    var me = rec.cur; rec.cur = null; if (!me) return;
+    me.keep = keep || null;
+    try { if (me.mr.state !== 'inactive') me.mr.stop(); } catch (e) {}
+  }
+  function grabFrames() { var from = (Math.max(lockT - 1, frameT - 15)) * 1000; return rawBuf.filter(function (r) { return r[0] >= from; }); }
+  function logEvent(ev) {
+    ev.frames = grabFrames(); dataLog.push(ev);
+    var sw = dataLog.filter(function (e) { return e.kind === 'swing'; }), sk = dataLog.filter(function (e) { return e.kind !== 'swing'; });
+    dataLog = sw.slice(-20).concat(sk.slice(-10)).sort(function (x, y) { return x.at - y.at; });
+  }
+  function stamp() { var d = new Date(), p = function (v) { return (v < 10 ? '0' : '') + v; }; return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()); }
+  function saveFile(file) { var u = URL.createObjectURL(file), l = document.createElement('a'); l.href = u; l.download = file.name; document.body.appendChild(l); l.click(); l.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); }
+  function shareFiles(files) {
+    if (!files.length) return;
+    try { if (navigator.canShare && navigator.canShare({ files: files })) { navigator.share({ files: files }).catch(function () {}); return; } } catch (e) {}
+    files.forEach(saveFile);
+  }
+  function clipFile(c) { return new File([c.blob], c.skip ? 'swing-skip-' + c.skip + '.' + c.ext : 'swing-' + (c.n < 10 ? '0' : '') + c.n + '.' + c.ext, { type: c.blob.type }); }
+  function dataFile() {
+    var o = { v: 2, when: new Date().toISOString(), ua: navigator.userAgent, video: [video.videoWidth, video.videoHeight], mode: mode, fps: Math.round(lastFps),
+      cfg: { view: cfg.view, focus: cfg.focus, model: cfg.model, heightCm: cfg.heightCm }, spikes: tracker ? (tracker.spikes || 0) : 0,
+      format: 'frames: [t_ms, then x*1000, y*1000, visibility*100 for each of the 33 pose landmarks]', events: dataLog };
+    return new File([JSON.stringify(o)], 'swing-data-' + stamp() + '.txt', { type: 'text/plain' });
+  }
+
   function newTracker() {
     var topt = { view: cfg.view }; if (qs.get('still')) topt.stillWin = +qs.get('still');
     tracker = new SwingCore.Tracker(topt);
@@ -642,12 +740,15 @@
     tracker.on('state', function (s) {
       if (s === 'swing') setPill('揮桿中', 'swing');
       else if (s === 'post') setPill('分析中…', 'swing');
+      // 沒有揮桿就離開站位：丟掉這段錄影（有揮桿或「不算」時，下面的事件會先把它存起來）
+      else if (s === 'idle') setTimeout(function () { if (rec.cur && tracker && tracker.state === 'idle') recStop(null); }, 0);
     });
     tracker.on('hint', onHint);
-    tracker.on('address', function (a) { onAddress(a, true); });
+    tracker.on('address', function (a) { lockT = frameT; recStart(); onAddress(a, true); });
     tracker.on('addressUpdate', function (a) { onAddress(a, false); });
     tracker.on('swing', onSwing);
     tracker.on('skip', function (code) {
+      recStop({ skip: code }); logEvent({ kind: 'skip', code: code, at: Date.now() });
       var t = SKIPS[code] || SKIPS.fail; setStatus(t);
       if (code === 'slow') speak(t, 1);
     });
@@ -670,11 +771,18 @@
         ctx.strokeStyle = 'rgba(255,107,94,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
       }
     }
+    if (lm) {   // 保留最近 20 秒的關節點，匯出偵測資料時用
+      var row = [Math.round(frameT * 1000)];
+      for (var i = 0; i < 33; i++) { var p = lm[i]; row.push(Math.round(p.x * 1000), Math.round(p.y * 1000), Math.round((p.visibility || 0) * 100)); }
+      rawBuf.push(row); while (rawBuf.length && rawBuf[0][0] < (frameT - 20) * 1000) rawBuf.shift();
+    }
     tracker.feed(frameT, lm, vw && vh ? vw / vh : 1);
     fpsN++; var now = performance.now();
     if (now - fpsT0 > 1000) {
       var fps = fpsN * 1000 / (now - fpsT0); fpsN = 0; fpsT0 = now;
-      $('fps').textContent = Math.round(fps) + ' fps';
+      lastFps = fps;
+      var vv = tracker.votes.length || cfg.view !== 'auto' ? (tracker.view(null) === 'dtl' ? ' · 背後' : ' · 正面') : '';
+      $('fps').textContent = Math.round(fps) + ' fps' + vv;
       slowN = (mode === 'camera' && fps < 12) ? slowN + 1 : 0;
       $('slow').classList.toggle('hide', slowN < 4);
     }
@@ -689,7 +797,7 @@
     if (!running) return;
     if (!busy && video.readyState >= 2 && video.videoWidth) {
       busy = true;
-      frameT = mode === 'file' ? (meta && meta.mediaTime != null ? meta.mediaTime : video.currentTime) : performance.now() / 1000;
+      frameT = mode === 'file' ? (meta && meta.mediaTime != null ? meta.mediaTime : video.currentTime) : performance.now() / 1000 / TSCALE;
       try { await pose.send({ image: video }); } catch (e) { showErr(e); }
       busy = false;
     }
@@ -701,6 +809,7 @@
   function onSwing(rep) {
     var j = SwingCore.judge(rep, { heightCm: cfg.heightCm, enabled: cfg.enabled, focus: cfg.focus });
     history.push({ n: history.length + 1, rep: rep, j: j });
+    recStop({ n: history.length }); logEvent({ kind: 'swing', n: history.length, rep: rep, say: j.say, at: Date.now() });
     var say = $('say'); say.textContent = j.say; say.className = j.issues.length ? 'bad' : 'ok';
     var ul = $('detail'); ul.innerHTML = '';
     j.issues.forEach(function (x) { var li = document.createElement('li'); li.className = 'bad'; li.textContent = x.text; ul.appendChild(li); });
@@ -715,11 +824,14 @@
     var cols = face
       ? [['頭下沉', 'headDrop', 'cm', 'head'], ['重心移', 'shiftImp', 'cm', 'shift'], ['頭後晃', 'swayTop', 'cm', 'sway'], ['上桿', 'backswing', 's', 'tempo'], ['停頓', 'pause', 's', 'pause']]
       : [['頭下沉', 'headDrop', 'cm', 'head'], ['站位前傾', 'tiltAddr', 'ang', 'setup'], ['擊球前傾', 'tiltImp', 'ang', 'posture'], ['上桿', 'backswing', 's', 'tempo'], ['停頓', 'pause', 's', 'pause']];
-    $('thead').innerHTML = '<tr><th>#</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr>';
+    if (!history.length) return;
+    var has = {}; clips.forEach(function (c) { if (!c.skip) has[c.n] = 1; });
+    $('thead').innerHTML = '<tr><th>#</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '<th></th></tr>';
     var fmt = function (v, u) { if (v == null || isNaN(v)) return '–'; return u === 'cm' ? cmOf(v) + ' cm' : u === 'ang' ? v.toFixed(0) + '°' : v.toFixed(2) + ' s'; };
     $('tbody').innerHTML = history.slice().reverse().map(function (h) {
       var bad = {}; h.j.issues.forEach(function (x) { bad[x.key] = 1; });
-      return '<tr><td>' + h.n + '</td>' + cols.map(function (c) { return '<td class="' + (bad[c[3]] ? 'flag' : '') + '">' + fmt(h.rep[c[1]], c[2]) + '</td>'; }).join('') + '</tr>';
+      return '<tr><td>' + h.n + '</td>' + cols.map(function (c) { return '<td class="' + (bad[c[3]] ? 'flag' : '') + '">' + fmt(h.rep[c[1]], c[2]) + '</td>'; }).join('') +
+        '<td>' + (has[h.n] ? '<button class="ghost small" data-clip="' + h.n + '">影片</button>' : '') + '</td></tr>';
     }).join('');
     $('count').textContent = '（' + history.length + ' 球）';
     var avg = history.reduce(function (s, h) { return s + h.rep.headDrop; }, 0) / history.length;
@@ -735,7 +847,7 @@
   /* ---------- 開始／結束 ---------- */
   async function begin(kind, file) {
     $('err').textContent = ''; $('err2').textContent = '';
-    readCfg(); initAudio(); mode = kind; history = [];
+    readCfg(); initAudio(); mode = kind; history = []; rawBuf = []; dataLog = []; clips = []; rec.mime = pickMime();
     $('setup').classList.add('hide'); $('live').classList.remove('hide');
     $('say').textContent = '等待第一球'; $('say').className = ''; $('detail').innerHTML = ''; $('tbody').innerHTML = ''; $('thead').innerHTML = ''; $('count').textContent = ''; $('avg').textContent = '';
     setPill('載入偵測模型…', '');
@@ -764,7 +876,7 @@
     }
   }
   function end() {
-    running = false;
+    running = false; recStop(null);
     try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
     stream = null; try { video.pause(); } catch (e) {}
     try { if (wake) wake.release(); } catch (e) {} wake = null;
@@ -785,6 +897,17 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () { window.prompt('複製下列文字', t); });
     else window.prompt('複製下列文字', t);
   };
+  $('tbody').addEventListener('click', function (e) {
+    var n = e.target && e.target.getAttribute && e.target.getAttribute('data-clip'); if (!n) return;
+    var c = clips.filter(function (x) { return !x.skip && String(x.n) === n; })[0]; if (c) shareFiles([clipFile(c)]);
+  });
+  $('bClips').onclick = function () {
+    if (!clips.length) { setStatus(mode === 'camera' ? '還沒有錄到影片' : '分析影片檔時不會另外錄影'); return; }
+    shareFiles(clips.map(clipFile));
+  };
+  $('bData').onclick = function () { if (!dataLog.length) { setStatus('還沒有可匯出的資料'); return; } shareFiles([dataFile()]); };
+  // 站位等太久時重新開始錄，讓每段影片保持精簡
+  setInterval(function () { if (rec.cur && tracker && tracker.state === 'address' && performance.now() - rec.cur.t0 > 10000 * TSCALE) recStart(); }, 1000);
   loadCfg();
 })();
 </script>
