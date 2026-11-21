@@ -1,0 +1,20 @@
+# 避免不小心把自己的影片或照片放上來
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.m4v
+*.avi
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.HEIC
+.DS_Store
+Thumbs.db
+
+# 部署或本機測試時下載的 MediaPipe Pose
+vendor/
+package/
+_site/
+*.tgz

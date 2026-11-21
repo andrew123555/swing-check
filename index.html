@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f1512">
+<link rel="icon" href="data:,">
+<title>揮桿即時檢測</title>
+<style>
+  :root { --bg:#0f1512; --panel:#18211c; --line:#2a372f; --ink:#eef3ef; --dim:#9db0a4; --accent:#7ddc8a; --warn:#ffb84d; --bad:#ff6b5e; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif; -webkit-text-size-adjust:100%; }
+  body { padding:calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); max-width:760px; margin:0 auto; }
+  h1 { font-size:20px; margin:4px 0 12px; letter-spacing:.02em; }
+  h2 { font-size:14px; color:var(--dim); font-weight:600; margin:18px 0 8px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); font-size:15px; }
+  .row:last-child { border-bottom:0; }
+  .row label { flex:1; }
+  select,input[type=number] { background:#0f1512; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:15px; max-width:56%; }
+  input[type=number] { width:84px; }
+  input[type=checkbox] { width:22px; height:22px; accent-color:var(--accent); }
+  button { font:inherit; border:0; border-radius:10px; padding:14px 16px; font-size:17px; font-weight:600; color:#0b130e; background:var(--accent); width:100%; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); font-weight:500; }
+  button.small { width:auto; padding:9px 14px; font-size:14px; }
+  .btns { display:grid; gap:10px; margin-top:14px; }
+  ol.tips { margin:0; padding-left:20px; color:var(--dim); font-size:14px; line-height:1.7; }
+  .hide { display:none !important; }
+  #stage { position:relative; background:#000; border-radius:12px; overflow:hidden; }
+  #view { display:block; width:100%; height:auto; max-height:46vh; object-fit:contain; background:#000; }
+  #pill { position:absolute; left:10px; top:10px; padding:6px 12px; border-radius:999px; background:rgba(0,0,0,.6); font-size:14px; font-weight:600; }
+  #pill.ready { background:var(--accent); color:#0b130e; }
+  #pill.swing { background:var(--warn); color:#231700; }
+  #fps { position:absolute; right:10px; top:10px; padding:6px 10px; border-radius:999px; background:rgba(0,0,0,.6); font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; }
+  #result { margin-top:12px; }
+  #say { font-size:26px; font-weight:700; line-height:1.35; margin:2px 0 10px; }
+  #say.ok { color:var(--accent); } #say.bad { color:var(--warn); }
+  ul.list { list-style:none; margin:0; padding:0; font-size:15px; line-height:1.6; }
+  ul.list li { padding:3px 0 3px 22px; position:relative; }
+  ul.list li::before { position:absolute; left:0; }
+  ul.list li.bad::before { content:"✕"; color:var(--bad); } ul.list li.good::before { content:"✓"; color:var(--accent); }
+  ul.list li.good { color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  th,td { padding:6px 4px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--dim); font-weight:500; } td:first-child,th:first-child { text-align:left; }
+  td.flag { color:var(--warn); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  #err { color:var(--bad); font-size:14px; white-space:pre-wrap; margin-top:10px; }
+  .note { color:var(--dim); font-size:13px; line-height:1.6; margin-top:8px; }
+  .bar { display:flex; gap:8px; margin-top:10px; }
+</style>
+</head>
+<body>
+<h1>揮桿即時檢測</h1>
+
+<section id="setup">
+  <div class="panel">
+    <ol class="tips">
+      <li>手機直立固定在腰部高度，全身從頭到腳都要入鏡。</li>
+      <li>背後角度：鏡頭在你身後，沿著目標線看出去。正面角度：鏡頭正對你的胸口。</li>
+      <li>握桿站好不動約 1 秒，聽到「嗶」代表已鎖定站位，就可以揮桿。</li>
+      <li>揮完大約 1 秒後會語音播報這一球最該改的地方。</li>
+    </ol>
+  </div>
+
+  <h2>設定</h2>
+  <div class="panel">
+    <div class="row"><label for="cView">拍攝角度</label>
+      <select id="cView"><option value="auto">自動判斷</option><option value="dtl">背後（沿目標線）</option><option value="face">正面</option></select></div>
+    <div class="row"><label for="cFocus">本次練習重點</label>
+      <select id="cFocus"><option value="auto">自動（最重要的問題）</option><option value="head">頭部高度</option><option value="setup">站位前傾（背後）</option><option value="posture">提早起身（背後）</option><option value="shift">重心移轉（正面）</option><option value="sway">頭部左右晃動（正面）</option><option value="tempo">上桿節奏</option></select></div>
+    <div class="row"><label for="cCam">鏡頭</label>
+      <select id="cCam"><option value="environment">後鏡頭</option><option value="user">前鏡頭</option></select></div>
+    <div class="row"><label for="cHeight">身高（公分）</label><input id="cHeight" type="number" min="120" max="220" value="170"></div>
+    <div class="row"><label for="cModel">偵測模型</label>
+      <select id="cModel"><option value="1">標準（較準）</option><option value="0">輕量（較快）</option></select></div>
+    <div class="row"><label for="cVoice">語音播報</label><input id="cVoice" type="checkbox" checked></div>
+    <div class="row"><label for="cSetup">站位檢查（揮桿前提醒）</label><input id="cSetup" type="checkbox" checked></div>
+    <div class="row"><label for="cPause">檢查頂點停頓</label><input id="cPause" type="checkbox" checked></div>
+  </div>
+
+  <div class="btns">
+    <button id="bStart">開始檢測（開啟相機）</button>
+    <button id="bFile" class="ghost">用已拍好的影片測試</button>
+    <input id="file" type="file" accept="video/*" class="hide">
+  </div>
+  <div id="err"></div>
+  <p class="note">影像只在這支手機上處理，不會上傳。第一次開啟需要從本站下載偵測模型（約 15 MB）。</p>
+</section>
+
+<section id="live" class="hide">
+  <div id="stage">
+    <canvas id="view" width="360" height="640"></canvas>
+    <div id="pill">載入中…</div>
+    <div id="fps"></div>
+  </div>
+  <div id="slow" class="note hide" style="color:var(--warn)">偵測速度太慢，快速的下桿可能抓不到。請按「結束」，把偵測模型改成「輕量」再試一次。</div>
+  <video id="video" playsinline webkit-playsinline muted autoplay style="position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
+
+  <div id="result" class="panel">
+    <div id="say">等待第一球</div>
+    <ul id="detail" class="list"></ul>
+  </div>
+
+  <h2>本次紀錄 <span id="count"></span></h2>
+  <div class="panel scroll">
+    <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <div class="note" id="avg"></div>
+  </div>
+  <div class="bar">
+    <button id="bCopy" class="ghost small">複製紀錄</button>
+    <button id="bStop" class="ghost small">結束</button>
+  </div>
+  <div id="err2" style="color:var(--bad);font-size:14px;white-space:pre-wrap;margin-top:10px"></div>
+</section>
+
+<script>
+/* 揮桿檢測核心：姿勢關節點 → 自動偵測揮桿 → 量測 → 判斷。瀏覽器與 Node 共用。 */
+(function (root) {
+  'use strict';
+  var K = { NOSE: 0, LEAR: 7, REAR: 8, LSH: 11, RSH: 12, LWR: 15, RWR: 16, LHIP: 23, RHIP: 24,
+    LKN: 25, RKN: 26, LAN: 27, RAN: 28, LHEEL: 29, RHEEL: 30, LTOE: 31, RTOE: 32 };
+
+  function pt(lm, i, aspect) {
+    var p = lm[i];
+    if (Array.isArray(p)) return { x: p[0] * aspect, y: p[1], v: p[3] == null ? 1 : p[3] };
+    return { x: p.x * aspect, y: p.y, v: p.visibility == null ? 1 : p.visibility };
+  }
+  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function angle(a, b, c) {
+    var v1x = a.x - b.x, v1y = a.y - b.y, v2x = c.x - b.x, v2y = c.y - b.y;
+    var d = Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y) + 1e-9;
+    return Math.acos(Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / d))) * 180 / Math.PI;
+  }
+  function median(arr) {
+    var a = arr.slice().sort(function (x, y) { return x - y; });
+    var n = a.length; if (!n) return NaN;
+    return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2;
+  }
+
+  /* 單一畫面的特徵。座標單位＝畫面高度的比例（x 已乘上長寬比）。 */
+  function feat(t, lm, aspect) {
+    var P = function (i) { return pt(lm, i, aspect); };
+    var lw = P(K.LWR), rw = P(K.RWR), ls = P(K.LSH), rs = P(K.RSH), lh = P(K.LHIP), rh = P(K.RHIP);
+    var lk = P(K.LKN), rk = P(K.RKN), la = P(K.LAN), ra = P(K.RAN);
+    var le = P(K.LEAR), re = P(K.REAR);
+    var lheel = P(K.LHEEL), rheel = P(K.RHEEL), ltoe = P(K.LTOE), rtoe = P(K.RTOE);
+    var f = {
+      t: t,
+      hands: mid(lw, rw), wristGap: dist(lw, rw),
+      head: mid(le, re),   // 兩耳中點：頭轉動時比鼻子穩定
+      sh: mid(ls, rs), hip: mid(lh, rh), ank: mid(la, ra),
+      shW: Math.abs(ls.x - rs.x), hipW: Math.abs(lh.x - rh.x),
+      kneeL: angle(lh, lk, la), kneeR: angle(rh, rk, ra), kneeLv: Math.min(lh.v, lk.v, la.v), kneeRv: Math.min(rh.v, rk.v, ra.v),
+      heelL: ltoe.y - lheel.y, heelR: rtoe.y - rheel.y,
+      lAnkX: la.x, rAnkX: ra.x
+    };
+    var core = Math.min(ls.v, rs.v, lh.v, rh.v);
+    var legs = Math.max(Math.min(lk.v, la.v), Math.min(rk.v, ra.v));
+    f.ok = core > 0.4 && legs > 0.4 && Math.max(lw.v, rw.v) > 0.2;
+    return f;
+  }
+
+  var NUMKEYS = ['wristGap', 'shW', 'hipW', 'kneeL', 'kneeR', 'kneeLv', 'kneeRv', 'heelL', 'heelR', 'lAnkX', 'rAnkX'];
+  var PTKEYS = ['hands', 'head', 'sh', 'hip', 'ank'];
+  function medianFeat(fs) {
+    var o = { t: fs[fs.length - 1].t };
+    PTKEYS.forEach(function (k) {
+      o[k] = { x: median(fs.map(function (f) { return f[k].x; })), y: median(fs.map(function (f) { return f[k].y; })) };
+    });
+    NUMKEYS.forEach(function (k) { o[k] = median(fs.map(function (f) { return f[k]; })); });
+    o.S = o.ank.y - o.head.y;
+    return o;
+  }
+
+  var VIEW_SPLIT = 0.14;   // 肩寬÷身體尺度：小於此值視為背後角度
+  var DEFAULTS = {
+    view: 'auto',
+    stillWin: 0.6,        // 站位需靜止的秒數
+    stillTol: 0.022,      // 靜止容許的雙手移動量（× 身體尺度）
+    startTol: 0.05,       // 雙手離開站位多少算開始上桿
+    minRise: 0.13,        // 雙手至少離開站位多遠才算一次揮桿
+    impactTol: 0.10,      // 回到站位附近多近算通過擊球區
+    postWait: 1.0,        // 擊球後再收集多久（收桿）
+    minFollow: 0.08,      // 擊球後雙手至少再離開多少才算有送桿
+    minSpeed: 1.1         // 擊球區雙手速度低於此值視為慢動作，不分析
+  };
+
+  function Tracker(opts) {
+    this.o = Object.assign({}, DEFAULTS, opts || {});
+    this.buf = []; this.state = 'idle'; this.addr = null; this.handlers = {};
+    this.blockUntil = -1e9; this.lastT = -1e9;
+  }
+  Tracker.prototype.on = function (ev, fn) { this.handlers[ev] = fn; return this; };
+  Tracker.prototype._emit = function (ev, payload) { if (this.handlers[ev]) this.handlers[ev](payload); };
+  Tracker.prototype._set = function (s) { if (s !== this.state) { this.state = s; this._emit('state', s); } };
+  Tracker.prototype.reset = function () { this.buf = []; this.addr = null; this._set('idle'); };
+
+  Tracker.prototype._stillWindow = function (t) {
+    var o = this.o, buf = this.buf, w = [];
+    for (var i = buf.length - 1; i >= 0 && buf[i].t >= t - o.stillWin; i--) w.push(buf[i]);
+    if (w.length < 4 || (w[0].t - w[w.length - 1].t) < o.stillWin * 0.8) return null;
+    if (w[w.length - 1].t < this.blockUntil) return null;
+    var m = medianFeat(w.reverse());
+    if (!(m.S > 0.15)) return null;                       // 人太小或沒站直在畫面裡
+    if (m.hands.y < m.hip.y - 0.10 * m.S) return null;     // 手要在腰部以下
+    if (m.wristGap > 0.16 * m.S) return null;              // 雙手要靠在一起（握著球桿）
+    for (var j = 0; j < w.length; j++) if (dist(w[j].hands, m.hands) > o.stillTol * m.S) return null;
+    return m;
+  };
+
+  Tracker.prototype.feed = function (t, lm, aspect) {
+    if (t < this.lastT - 0.5) this.reset();   // 影片倒轉或重新開始
+    this.lastT = t;
+    if (!lm) return;
+    var f = feat(t, lm, aspect || 1);
+    if (!f.ok) return;
+    this.feedFeat(f);
+  };
+  Tracker.prototype.feedFeat = function (f) {
+    var t = f.t, buf = this.buf, o = this.o;
+    buf.push(f);
+    while (buf.length && buf[0].t < t - 12) buf.shift();
+    var a = this.addr, S = a ? a.S : 0;
+
+    if (this.state === 'idle' || this.state === 'address') {
+      var m = this._stillWindow(t);
+      if (m) {
+        var first = this.state === 'idle';
+        this.addr = m; this._set('address');
+        if (first) this._emit('address', addressReport(m));
+        return;
+      }
+      if (this.state === 'address') {
+        if (dist(f.hip, a.hip) > 0.15 * S) { this.addr = null; this._set('idle'); return; }
+        if (dist(f.hands, a.hands) > o.startTol * S) {
+          this._set('swing'); this.sw = { t0: t, maxRise: 0, tTop: t };
+        }
+      }
+      return;
+    }
+
+    if (this.state === 'swing') {
+      var sw = this.sw, rise = dist(f.hands, a.hands);
+      if (rise > sw.maxRise) { sw.maxRise = rise; sw.tTop = t; }
+      if (dist(f.hip, a.hip) > 0.2 * S || t - sw.t0 > 6) { this.addr = null; this._set('idle'); return; }
+      if (sw.maxRise >= o.minRise * S) {
+        if (t > sw.tTop && dist(f.hands, a.hands) < o.impactTol * S) {
+          this._set('post'); sw.tImp = t; sw.follow = 0;
+        }
+      } else {
+        var m2 = this._stillWindow(t);          // 只是晃桿，又回到站位
+        if (m2) { this.addr = m2; this._set('address'); }
+      }
+      return;
+    }
+
+    if (this.state === 'post') {
+      var s2 = this.sw;
+      s2.follow = Math.max(s2.follow, dist(f.hands, a.hands));
+      if (t >= s2.tImp + (this._flushing ? 0.5 : o.postWait)) {
+        var frames = buf.filter(function (x) { return x.t >= a.t - 1.0; });
+        this.blockUntil = t; this.addr = null; this._set('idle');
+        if (s2.follow >= o.minFollow * S) {
+          var rep = analyzeSwing(frames, a, s2, o.view);
+          if (!rep) this._emit('skip', '量測失敗');
+          else if (rep.peakSpeed < o.minSpeed) this._emit('skip', '動作太慢，視為慢動作練習');
+          else if (rep.hipMove > 0.08 || Math.abs(rep.headDrop) > 0.15) this._emit('skip', '身體位置移動太多，不是揮桿');
+          else this._emit('swing', rep);
+        } else {
+          this._emit('skip', '沒有送桿，視為預備動作');
+        }
+      }
+    }
+  };
+
+  /* 影片結束時呼叫：把還在等收桿的那一球結算掉 */
+  Tracker.prototype.flush = function () {
+    if (this.state !== 'post' || !this.buf.length) return;
+    var last = this.buf[this.buf.length - 1];
+    this._flushing = true; this.buf.pop(); this.feedFeat(last); this._flushing = false;
+  };
+
+  function chooseKnee(m) {
+    if (m.kneeLv > 0.6 && m.kneeRv > 0.6) return (m.kneeL + m.kneeR) / 2;
+    return m.kneeLv > m.kneeRv ? m.kneeL : m.kneeR;
+  }
+  function viewOf(m) { return (Math.max(m.shW, m.hipW) / m.S) < VIEW_SPLIT ? 'dtl' : 'face'; }
+  function addressReport(m) {
+    var ballDir = (m.hands.x - m.hip.x) >= 0 ? 1 : -1;
+    return { view: viewOf(m), knee: chooseKnee(m), tilt: tiltOf(m, ballDir), S: m.S };
+  }
+
+  function tiltOf(f, ballDir) {  // 上半身前傾角（度），往球的方向為正
+    return Math.atan2((f.sh.x - f.hip.x) * ballDir, f.hip.y - f.sh.y) * 180 / Math.PI;
+  }
+
+  function analyzeSwing(frames, a, sw, view) {
+    var S = a.S, n = frames.length, i;
+    if (n < 8) return null;
+    var d = frames.map(function (f) { return dist(f.hands, a.hands); });
+    var rise = d;   // 雙手離開站位位置的距離
+    // 上桿起點
+    var iGo = -1;
+    for (i = 0; i < n; i++) if (frames[i].t > a.t - 0.05 && d[i] > DEFAULTS.startTol * S) { iGo = i; break; }
+    if (iGo < 0) return null;
+    var iStart = iGo;
+    while (iStart > 0 && d[iStart] > 0.02 * S) iStart--;
+    // 擊球：頂點之後，雙手最接近站位位置的那一格
+    var iLive = n - 1;
+    for (i = 0; i < n; i++) if (frames[i].t >= sw.tImp) { iLive = i; break; }
+    var iTopRaw = iGo;
+    for (i = iGo; i <= iLive; i++) if (rise[i] > rise[iTopRaw]) iTopRaw = i;
+    var iImp = iTopRaw + 1 < n ? iTopRaw + 1 : iTopRaw;
+    for (i = iTopRaw + 1; i < n && frames[i].t <= sw.tImp + 0.15; i++) if (d[i] < d[iImp]) iImp = i;
+    // 頂點停頓：高度接近最高點且移動很慢的連續區段
+    var speed = function (k) {
+      if (k <= 0) return 0;
+      return dist(frames[k].hands, frames[k - 1].hands) / Math.max(1e-3, frames[k].t - frames[k - 1].t) / S;
+    };
+    var near = function (k) { return rise[iTopRaw] - rise[k] < 0.035 * S; };
+    var p0 = iTopRaw, p1 = iTopRaw;
+    while (p0 - 1 > iStart && near(p0 - 1) && speed(p0) < 0.45) p0--;
+    while (p1 + 1 < iImp && near(p1 + 1) && speed(p1 + 1) < 0.45) p1++;
+    var tStart = frames[iStart].t, tImp = frames[iImp].t;
+    var rep = {
+      view: (view === 'dtl' || view === 'face') ? view : viewOf(a), S: S, t: tImp,
+      backswing: frames[p0].t - tStart, pause: frames[p1].t - frames[p0].t, down: tImp - frames[p1].t,
+      riseTop: rise[iTopRaw] / S,
+      kneeAddr: chooseKnee(a)
+    };
+    // 擊球前後的畫面
+    var near2 = frames.filter(function (f) { return f.t >= tImp - 0.12 && f.t <= tImp + 0.06; });
+    if (!near2.length) near2 = [frames[iImp]];
+    var headLow = Math.max.apply(null, near2.map(function (f) { return f.head.y; }));
+    rep.headDrop = (headLow - a.head.y) / S;                     // 正值＝頭往下
+    rep.hipDrop = (median(near2.map(function (f) { return f.hip.y; })) - a.hip.y) / S;
+    rep.hipMove = dist({ x: median(near2.map(function (f) { return f.hip.x; })), y: median(near2.map(function (f) { return f.hip.y; })) }, a.hip) / S;
+    var pk = 0;
+    for (i = 1; i < n; i++) if (frames[i].t >= tImp - 0.3 && frames[i].t <= tImp + 0.15) pk = Math.max(pk, speed(i));
+    var iHalf = iImp;
+    while (iHalf > iTopRaw && d[iHalf] < 0.5 * d[iTopRaw]) iHalf--;
+    rep.hit = tImp - frames[iHalf].t;                            // 雙手走完下桿後半段花的時間
+    rep.peakSpeed = pk;                                          // 擊球區雙手最快速度（身體尺度／秒）
+    // 收桿
+    var fin = frames.filter(function (f) { return f.t >= tImp + 0.7; });
+    if (!fin.length) fin = frames.slice(-2);
+    var lift = function (f) { return Math.max(f.heelL - a.heelL, f.heelR - a.heelR); };
+    rep.heelLift = median(fin.map(lift)) / S;
+    var top = frames[iTopRaw], imp = frames[iImp];
+
+    if (rep.view === 'dtl') {
+      var ballDir = (a.hands.x - a.hip.x) >= 0 ? 1 : -1;
+      rep.tiltAddr = tiltOf(a, ballDir);
+      rep.tiltImp = median(near2.map(function (f) { return tiltOf(f, ballDir); }));
+      rep.tiltChange = rep.tiltImp - rep.tiltAddr;               // 正值＝更往球彎下去
+      rep.hipFwd = (median(near2.map(function (f) { return f.hip.x; })) - a.hip.x) * ballDir / S; // 正值＝臀部往球頂
+      rep.headFwd = (median(near2.map(function (f) { return f.head.x; })) - a.head.x) * ballDir / S;
+    } else {
+      var away = (top.hands.x - a.hands.x) >= 0 ? 1 : -1;        // 上桿方向＝遠離目標
+      var tgt = -away;
+      rep.swayTop = (top.head.x - a.head.x) * away / S;          // 正值＝上桿時頭往後晃
+      rep.hipSwayTop = (top.hip.x - a.hip.x) * away / S;         // 正值＝上桿時髖部往後滑
+      rep.shiftImp = (median(near2.map(function (f) { return f.hip.x; })) - a.hip.x) * tgt / S; // 正值＝髖部往目標移
+      rep.headImp = (median(near2.map(function (f) { return f.head.x; })) - a.head.x) * tgt / S;
+      rep.shiftFin = (median(fin.map(function (f) { return f.hip.x; })) - a.hip.x) * tgt / S;
+      rep.stanceW = Math.abs(a.lAnkX - a.rAnkX) / S;
+    }
+    return rep;
+  }
+
+  /* 門檻。距離類的單位是「身體尺度」的比例，judge 會換算成公分。 */
+  var LIMITS = {
+    headDrop: 0.04, tiltDive: 5, hipDrop: 0.02,
+    tiltAddrMin: 25,
+    hipFwd: 0.03, tiltRise: -8,
+    backswingFast: 0.55, pause: 0.25,
+    shiftFin: 0.06,
+    kneeStraight: 170, kneeDeep: 138,
+    shiftImp: 0.03, swayTop: 0.05, headImp: 0.06
+  };
+
+  function judge(rep, cfg) {
+    cfg = cfg || {}; var L = Object.assign({}, LIMITS, cfg.limits || {});
+    var cmPer = (cfg.heightCm || 170) * 0.75;      // 站位時頭到腳踝的垂直距離約為身高的 75%
+    var cm = function (v) { return Math.round(Math.abs(v) * cmPer); };
+    var en = cfg.enabled || {}; var on = function (k) { return en[k] !== false; };
+    var checks = [];
+    // fail=true 表示要提醒；say 是語音，text 是畫面上的說明，pass 是過關時的說法
+    var add = function (key, pri, fail, say, text, pass) { checks.push({ key: key, pri: pri, fail: fail, say: say, text: text, pass: pass }); };
+
+    if (on('head')) {
+      var why = '保持頭的高度';
+      if (rep.view === 'dtl' && rep.tiltChange >= L.tiltDive && rep.tiltAddr < L.tiltAddrMin && on('setup')) why = '站位先多前傾，下桿胸口保持同樣高度';
+      else if (rep.view === 'dtl' && rep.tiltChange >= L.tiltDive) why = '上半身往球壓下去了，胸口保持站位的高度';
+      else if (rep.hipDrop >= L.hipDrop) why = '身體往下蹲了，膝蓋保持站位的角度';
+      var hd = Math.max(0, rep.headDrop);
+      add('head', 1, rep.headDrop > L.headDrop, '頭下沉' + cm(hd) + '公分，' + why,
+        '下桿時頭部下沉約 ' + cm(hd) + ' 公分：' + why, '頭部高度穩定，下沉' + cm(hd) + '公分');
+    }
+    if (rep.view === 'dtl' && on('setup')) {
+      add('setup', 3, rep.tiltAddr < L.tiltAddrMin, '站位太直，從髖部再往前傾',
+        '站位時上半身前傾只有 ' + rep.tiltAddr.toFixed(0) + '°（擊球時 ' + rep.tiltImp.toFixed(0) + '°），站得太直', '站位前傾 ' + rep.tiltAddr.toFixed(0) + '°');
+    }
+    if (rep.view === 'dtl' && on('posture')) {
+      add('posture', 2, rep.hipFwd > L.hipFwd || rep.tiltChange < L.tiltRise, '擊球時身體站起來了，臀部留在後面',
+        '擊球時提早起身：臀部往球頂了 ' + cm(Math.max(0, rep.hipFwd)) + ' 公分，前傾角變化 ' + rep.tiltChange.toFixed(0) + '°', '前傾角度有維持');
+    }
+    if (rep.view === 'face') {
+      if (on('shift')) {
+        var sh = Math.round(rep.shiftImp * cmPer);
+        add('shift', 2, rep.shiftImp < L.shiftImp, '重心沒有移到前腳，下桿先把前髖推向目標',
+          '擊球時髖部只往目標移了 ' + sh + ' 公分，重心留在後腳', '重心有往目標移，' + sh + '公分');
+      }
+      if (on('sway')) {
+        if (rep.swayTop > L.swayTop) add('sway', 3, true, '上桿時頭往後晃了' + cm(rep.swayTop) + '公分，頭留在球的上方', '上桿時頭部往後移了 ' + cm(rep.swayTop) + ' 公分');
+        else if (rep.headImp > L.headImp) add('sway', 3, true, '擊球時頭往目標衝了，頭留在球的後方', '擊球時頭部往目標移了 ' + cm(rep.headImp) + ' 公分');
+        else add('sway', 3, false, '', '', '頭部左右穩定');
+      }
+      if (on('finish')) {
+        add('finish', 5, rep.shiftFin < L.shiftFin, '收桿重心沒過去，身體要站到前腳上', '收桿時髖部只往目標移了 ' + Math.round(rep.shiftFin * cmPer) + ' 公分，重心沒有完全到前腳', '收桿重心有到前腳');
+      }
+    }
+    if (on('tempo')) {
+      add('tempo', 4, rep.backswing < L.backswingFast && rep.riseTop > 0.2, '上桿太急，放慢一點',
+        '上桿只花 ' + rep.backswing.toFixed(2) + ' 秒，太急', '上桿節奏 ' + rep.backswing.toFixed(2) + ' 秒');
+    }
+    if (on('pause') && rep.pause > L.pause) add('pause', 6, true, '頂點停太久，上桿下桿要連貫', '頂點停頓 ' + rep.pause.toFixed(2) + ' 秒');
+    if (rep.view === 'dtl' && on('knee')) {
+      if (rep.kneeAddr > L.kneeStraight) add('knee', 7, true, '站位膝蓋太直，再彎一點', '站位膝蓋角度 ' + rep.kneeAddr.toFixed(0) + '°，太直');
+      else if (rep.kneeAddr < L.kneeDeep) add('knee', 7, true, '站位蹲太低', '站位膝蓋角度 ' + rep.kneeAddr.toFixed(0) + '°，蹲太低');
+    }
+    checks.sort(function (x, y) { return x.pri - y.pri; });
+    var issues = checks.filter(function (c) { return c.fail; });
+    var good = checks.filter(function (c) { return !c.fail && c.pass; }).map(function (c) { return c.pass; });
+    var say = issues.length ? issues[0].say : '這球不錯';
+    if (cfg.focus && cfg.focus !== 'auto') {
+      var f = checks.filter(function (c) { return c.key === cfg.focus; })[0];
+      if (f) say = f.fail ? f.say : (f.pass + '，過關');
+    }
+    return { issues: issues, good: good, say: say };
+  }
+
+  var api = { Tracker: Tracker, analyzeSwing: analyzeSwing, judge: judge, feat: feat, LIMITS: LIMITS, DEFAULTS: DEFAULTS, viewOf: viewOf };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SwingCore = api;
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var qs = new URLSearchParams(location.search);
+  var LIB = 'vendor/pose/';
+  var video = $('video'), canvas = $('view'), ctx = canvas.getContext('2d');
+  var pose = null, tracker = null, running = false, busy = false, mode = 'camera', stream = null, wake = null;
+  var frameT = 0, fpsN = 0, fpsT0 = 0, slowN = 0, lastLm = null, history = [], cfg = {}, audio = null, voices = [];
+  var LINKS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[28,30],[30,32],[0,7],[0,8]];
+
+  function showErr(e) { var m = (e && e.message) ? e.message : String(e); $('err').textContent = m; $('err2').textContent = m; }
+  window.addEventListener('error', function (e) { showErr(e.message || '發生錯誤'); });
+  window.addEventListener('unhandledrejection', function (e) { showErr(e.reason); });
+
+  /* ---------- 設定 ---------- */
+  var FIELDS = { cView: 'view', cFocus: 'focus', cCam: 'cam', cHeight: 'heightCm', cModel: 'model', cVoice: 'voice', cPause: 'pause', cSetup: 'setup' };
+  function loadCfg() {
+    try { var s = JSON.parse(localStorage.getItem('swingcfg') || '{}');
+      Object.keys(FIELDS).forEach(function (id) { var k = FIELDS[id], el = $(id); if (s[k] == null) return;
+        if (el.type === 'checkbox') el.checked = !!s[k]; else el.value = s[k]; });
+    } catch (e) {}
+  }
+  function readCfg() {
+    cfg = {};
+    Object.keys(FIELDS).forEach(function (id) { var el = $(id); cfg[FIELDS[id]] = el.type === 'checkbox' ? el.checked : el.value; });
+    cfg.heightCm = Math.min(220, Math.max(120, +cfg.heightCm || 170));
+    cfg.enabled = { pause: cfg.pause, setup: cfg.setup };
+    try { localStorage.setItem('swingcfg', JSON.stringify(cfg)); } catch (e) {}
+  }
+
+  /* ---------- 聲音 ---------- */
+  function initAudio() {
+    try { var AC = window.AudioContext || window.webkitAudioContext; if (AC && !audio) audio = new AC(); if (audio && audio.state === 'suspended') audio.resume(); } catch (e) {}
+    try { voices = speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = function () { voices = speechSynthesis.getVoices(); }; } catch (e) {}
+    speak('準備中');   // iPhone 需要在按下按鈕的當下先發聲一次，之後才能自動播報
+  }
+  function beep(freq, dur) {
+    if (!audio) return;
+    try { var o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = freq || 880; o.connect(g); g.connect(audio.destination);
+      var t = audio.currentTime; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.15));
+      o.start(t); o.stop(t + (dur || 0.15) + 0.02); } catch (e) {}
+  }
+  function speak(text) {
+    if (!cfg.voice || !('speechSynthesis' in window)) return;
+    try { if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text); u.lang = 'zh-TW'; u.rate = 1.05;
+      var v = voices.filter(function (x) { return /zh[-_]TW/i.test(x.lang); })[0] || voices.filter(function (x) { return /^zh/i.test(x.lang); })[0];
+      if (v) u.voice = v; speechSynthesis.speak(u); } catch (e) {}
+  }
+
+  /* ---------- 姿勢偵測 ---------- */
+  function loadScript(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function () { rej(new Error('無法載入偵測元件，請確認網路連線')); }; document.head.appendChild(s); }); }
+  async function initPose() {
+    if (!window.Pose) await loadScript(LIB + 'pose.js');
+    pose = new window.Pose({ locateFile: function (f) { return LIB + f; } });
+    pose.setOptions({ modelComplexity: +cfg.model, smoothLandmarks: false, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    pose.onResults(onResults);
+    await pose.initialize();
+  }
+
+  function setPill(text, cls) { var p = $('pill'); p.textContent = text; p.className = cls || ''; }
+  var STATE_TEXT = { idle: ['握桿站好不動', ''], address: ['已鎖定站位，可以揮桿', 'ready'], swing: ['揮桿中', 'swing'], post: ['分析中…', 'swing'] };
+
+  function newTracker() {
+    var topt = { view: cfg.view }; if (qs.get('still')) topt.stillWin = +qs.get('still');
+    tracker = new SwingCore.Tracker(topt);
+    tracker.on('state', function (s) { var x = STATE_TEXT[s]; if (x) setPill(x[0], x[1]); });
+    tracker.on('address', function (a) {
+      beep(880, 0.15);
+      var dtl = cfg.view === 'dtl' || (cfg.view === 'auto' && a.view === 'dtl');
+      if (!dtl || !cfg.setup) return;
+      if (a.tilt < SwingCore.LIMITS.tiltAddrMin) speak('上半身再往前傾一點');
+      else if (a.knee > SwingCore.LIMITS.kneeStraight) speak('膝蓋再彎一點');
+    });
+    tracker.on('swing', onSwing);
+    tracker.on('skip', function () {});
+  }
+
+  function onResults(r) {
+    var lm = r.poseLandmarks || null; lastLm = lm;
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      var cw = 360, ch = Math.round(360 * vh / vw);
+      if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+      ctx.drawImage(video, 0, 0, cw, ch);
+      if (lm) {
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(125,220,138,.9)'; ctx.beginPath();
+        LINKS.forEach(function (l) { var a = lm[l[0]], b = lm[l[1]]; if (a.visibility < 0.3 || b.visibility < 0.3) return; ctx.moveTo(a.x * cw, a.y * ch); ctx.lineTo(b.x * cw, b.y * ch); });
+        ctx.stroke();
+      }
+      if (tracker.addr) { // 站位頭部高度參考線
+        var a0 = tracker.addr, y = (a0.head.y - 0.06 * a0.S) * ch;
+        ctx.strokeStyle = 'rgba(255,107,94,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
+      }
+    }
+    if (tracker.state === 'idle') setPill(lm ? '握桿站好不動' : '找不到人，請全身入鏡', '');
+    tracker.feed(frameT, lm, vw && vh ? vw / vh : 1);
+    fpsN++; var now = performance.now();
+    if (now - fpsT0 > 1000) {
+      var fps = fpsN * 1000 / (now - fpsT0); fpsN = 0; fpsT0 = now;
+      $('fps').textContent = Math.round(fps) + ' fps';
+      slowN = (mode === 'camera' && fps < 12) ? slowN + 1 : 0;
+      $('slow').classList.toggle('hide', slowN < 4);
+    }
+  }
+
+  function schedule() {
+    if (!running) return;
+    // 相機：每個畫面更新都檢查一次；影片檔：跟著影片的畫面時間走
+    if (mode === 'file' && video.requestVideoFrameCallback) video.requestVideoFrameCallback(tick); else requestAnimationFrame(function (t) { tick(t, null); });
+  }
+  async function tick(now, meta) {
+    if (!running) return;
+    if (!busy && video.readyState >= 2 && video.videoWidth) {
+      busy = true;
+      frameT = mode === 'file' ? (meta && meta.mediaTime != null ? meta.mediaTime : video.currentTime) : performance.now() / 1000;
+      try { await pose.send({ image: video }); } catch (e) { showErr(e); }
+      busy = false;
+    }
+    schedule();
+  }
+
+  /* ---------- 結果 ---------- */
+  function pct(v) { return v == null ? '' : (v * 100).toFixed(1); }
+  function onSwing(rep) {
+    var j = SwingCore.judge(rep, { heightCm: cfg.heightCm, enabled: cfg.enabled, focus: cfg.focus });
+    history.push({ n: history.length + 1, rep: rep, j: j });
+    var say = $('say'); say.textContent = j.say; say.className = j.issues.length ? 'bad' : 'ok';
+    var ul = $('detail'); ul.innerHTML = '';
+    j.issues.forEach(function (x) { var li = document.createElement('li'); li.className = 'bad'; li.textContent = x.text; ul.appendChild(li); });
+    j.good.forEach(function (x) { var li = document.createElement('li'); li.className = 'good'; li.textContent = x; ul.appendChild(li); });
+    speak(j.say);
+    renderTable();
+  }
+  function cmOf(v) { return (v * cfg.heightCm * 0.75).toFixed(0); }
+  function renderTable() {
+    var face = history.length && history[history.length - 1].rep.view === 'face';
+    var cols = face
+      ? [['頭下沉', 'headDrop', 'cm', 'head'], ['重心移', 'shiftImp', 'cm', 'shift'], ['頭後晃', 'swayTop', 'cm', 'sway'], ['上桿', 'backswing', 's', 'tempo'], ['停頓', 'pause', 's', 'pause']]
+      : [['頭下沉', 'headDrop', 'cm', 'head'], ['站位前傾', 'tiltAddr', 'ang', 'setup'], ['擊球前傾', 'tiltImp', 'ang', 'posture'], ['上桿', 'backswing', 's', 'tempo'], ['停頓', 'pause', 's', 'pause']];
+    $('thead').innerHTML = '<tr><th>#</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr>';
+    var fmt = function (v, u) { if (v == null || isNaN(v)) return '–'; return u === 'cm' ? cmOf(v) + ' cm' : u === 'ang' ? v.toFixed(0) + '°' : v.toFixed(2) + ' s'; };
+    $('tbody').innerHTML = history.slice().reverse().map(function (h) {
+      var bad = {}; h.j.issues.forEach(function (x) { bad[x.key] = 1; });
+      return '<tr><td>' + h.n + '</td>' + cols.map(function (c) { return '<td class="' + (bad[c[3]] ? 'flag' : '') + '">' + fmt(h.rep[c[1]], c[2]) + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    $('count').textContent = '（' + history.length + ' 球）';
+    var avg = history.reduce(function (s, h) { return s + h.rep.headDrop; }, 0) / history.length;
+    $('avg').textContent = '平均頭部下沉 ' + cmOf(avg) + ' 公分。數值由畫面估算，適合看每一球之間的變化。';
+  }
+  function exportText() {
+    var lines = ['揮桿紀錄 ' + new Date().toLocaleString('zh-TW'), '#\t角度\t頭下沉cm\t站位前傾°\t擊球前傾°\t臀部前頂cm\t重心移cm\t頭後晃cm\t上桿s\t停頓s\t下桿s\t提醒'];
+    history.forEach(function (h) { var r = h.rep; var c = function (v) { return v == null ? '' : cmOf(v); };
+      lines.push([h.n, r.view === 'dtl' ? '背後' : '正面', c(r.headDrop), r.tiltAddr == null ? '' : r.tiltAddr.toFixed(0), r.tiltImp == null ? '' : r.tiltImp.toFixed(0), c(r.hipFwd), c(r.shiftImp), c(r.swayTop), r.backswing.toFixed(2), r.pause.toFixed(2), r.down.toFixed(2), h.j.say].join('\t')); });
+    return lines.join('\n');
+  }
+
+  /* ---------- 開始／結束 ---------- */
+  async function begin(kind, file) {
+    $('err').textContent = ''; $('err2').textContent = '';
+    readCfg(); initAudio(); mode = kind; history = [];
+    $('setup').classList.add('hide'); $('live').classList.remove('hide');
+    $('say').textContent = '等待第一球'; $('say').className = ''; $('detail').innerHTML = ''; $('tbody').innerHTML = ''; $('thead').innerHTML = ''; $('count').textContent = ''; $('avg').textContent = '';
+    setPill('載入偵測模型…', '');
+    try {
+      if (kind === 'camera') {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('這個瀏覽器無法開啟相機。請用 Safari 開啟 https 網址。');
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: cfg.cam }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } } });
+        video.srcObject = stream;
+      } else {
+        video.srcObject = null; video.src = typeof file === 'string' ? file : URL.createObjectURL(file);
+        video.playbackRate = +(qs.get('rate') || 1);
+      }
+      await new Promise(function (res, rej) { video.onloadedmetadata = res; video.onerror = function () { rej(new Error('影片無法播放，請換成 mp4（H.264）格式')); }; });
+      await initPose();
+      newTracker();
+      speak(kind === 'camera' ? '開始檢測，握桿站好' : '開始分析影片');
+      running = true; fpsT0 = performance.now(); fpsN = 0;
+      setPill('握桿站好不動', '');
+      await video.play();
+      if (kind === 'file') video.onended = function () { tracker.flush(); setPill('影片結束，共 ' + history.length + ' 球', '');  };
+      try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+      schedule();
+    } catch (e) {
+      var m = e && e.name === 'NotAllowedError' ? '沒有相機權限。請在 Safari 的網站設定允許相機後重新整理。' : (e && e.message) || String(e);
+      end(); showErr(m);
+    }
+  }
+  function end() {
+    running = false;
+    try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    stream = null; try { video.pause(); } catch (e) {}
+    try { if (wake) wake.release(); } catch (e) {} wake = null;
+    try { speechSynthesis.cancel(); } catch (e) {}
+    $('live').classList.add('hide'); $('setup').classList.remove('hide');
+  }
+  document.addEventListener('visibilitychange', async function () {
+    if (document.visibilityState === 'visible' && running) { try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  });
+
+  $('bStart').onclick = function () { begin('camera'); };
+  $('bFile').onclick = function () { readCfg(); initAudio(); $('file').click(); };
+  $('file').onchange = function () { if (this.files && this.files[0]) begin('file', this.files[0]); this.value = ''; };
+  $('bStop').onclick = end;
+  $('bCopy').onclick = function () {
+    var t = exportText(), b = this;
+    var done = function () { b.textContent = '已複製'; setTimeout(function () { b.textContent = '複製紀錄'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () { window.prompt('複製下列文字', t); });
+    else window.prompt('複製下列文字', t);
+  };
+  loadCfg();
+})();
+</script>
+</body>
+</html>
