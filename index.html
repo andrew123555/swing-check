@@ -50,6 +50,11 @@
   #err { color:var(--bad); font-size:14px; white-space:pre-wrap; margin-top:10px; }
   .note { color:var(--dim); font-size:13px; line-height:1.6; margin-top:8px; }
   .bar { display:flex; gap:8px; margin-top:10px; }
+  .checks { display:flex; gap:8px; margin-top:8px; }
+  .checks span { flex:1; text-align:center; padding:7px 4px; border-radius:8px; font-size:13px; border:1px solid var(--line); color:var(--dim); }
+  .checks span.ok { border-color:var(--accent); color:var(--accent); }
+  .checks span.no { border-color:var(--warn); color:var(--warn); }
+  #statusLine { min-height:1.6em; }
 </style>
 </head>
 <body>
@@ -60,7 +65,8 @@
     <ol class="tips">
       <li>手機直立固定在腰部高度，全身從頭到腳都要入鏡。</li>
       <li>背後角度：鏡頭在你身後，沿著目標線看出去。正面角度：鏡頭正對你的胸口。</li>
-      <li>握桿站好不動約 1 秒，聽到「嗶」代表已鎖定站位，就可以揮桿。</li>
+      <li>握桿站好不動約 1 秒，會依序確認「全身入鏡 → 雙手握桿 → 站位鎖定」，沒過關的會告訴你原因。</li>
+      <li>聽到「站位OK」或站位的修正提醒後就可以揮桿，要用正常速度。</li>
       <li>揮完大約 1 秒後會語音播報這一球最該改的地方。</li>
     </ol>
   </div>
@@ -96,6 +102,8 @@
     <div id="pill">載入中…</div>
     <div id="fps"></div>
   </div>
+  <div class="checks"><span id="ck0">全身入鏡</span><span id="ck1">雙手握桿</span><span id="ck2">站位鎖定</span></div>
+  <div id="statusLine" class="note"></div>
   <div id="slow" class="note hide" style="color:var(--warn)">偵測速度太慢，快速的下桿可能抓不到。請按「結束」，把偵測模型改成「輕量」再試一次。</div>
   <video id="video" playsinline webkit-playsinline muted autoplay style="position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
 
@@ -160,7 +168,13 @@
     };
     var core = Math.min(ls.v, rs.v, lh.v, rh.v);
     var legs = Math.max(Math.min(lk.v, la.v), Math.min(rk.v, ra.v));
-    f.ok = core > 0.4 && legs > 0.4 && Math.max(lw.v, rw.v) > 0.2;
+    var headV = Math.max(le.v, re.v), wristV = Math.max(lw.v, rw.v);
+    // 哪個部位看不到：person=整個人、feet=腳、head=頭、hands=手
+    f.miss = core <= 0.4 ? 'person'
+      : (legs <= 0.4 || Math.max(la.y, ra.y) > 1.0) ? 'feet'
+      : (headV <= 0.3 || Math.min(le.y, re.y) < 0) ? 'head'
+      : wristV <= 0.2 ? 'hands' : '';
+    f.ok = core > 0.4 && legs > 0.4 && wristV > 0.2;
     return f;
   }
 
@@ -202,22 +216,27 @@
   Tracker.prototype._stillWindow = function (t) {
     var o = this.o, buf = this.buf, w = [];
     for (var i = buf.length - 1; i >= 0 && buf[i].t >= t - o.stillWin; i--) w.push(buf[i]);
+    this.why = 'wait';
     if (w.length < 4 || (w[0].t - w[w.length - 1].t) < o.stillWin * 0.8) return null;
     if (w[w.length - 1].t < this.blockUntil) return null;
     var m = medianFeat(w.reverse());
-    if (!(m.S > 0.15)) return null;                       // 人太小或沒站直在畫面裡
-    if (m.hands.y < m.hip.y - 0.10 * m.S) return null;     // 手要在腰部以下
-    if (m.wristGap > 0.16 * m.S) return null;              // 雙手要靠在一起（握著球桿）
+    var last = w[w.length - 1];
+    if (!(m.S > 0.15)) { this.why = 'small'; return null; }                          // 人太小或沒站直在畫面裡
+    if (last.miss) { this.why = last.miss; return null; }                            // 頭或腳被切掉
+    if (m.hands.y < m.hip.y - 0.10 * m.S) { this.why = 'handsHigh'; return null; }    // 手要在腰部以下
+    if (m.wristGap > 0.16 * m.S) { this.why = 'grip'; return null; }                  // 雙手要靠在一起（握著球桿）
+    this.why = 'moving';
     for (var j = 0; j < w.length; j++) if (dist(w[j].hands, m.hands) > o.stillTol * m.S) return null;
+    this.why = '';
     return m;
   };
 
   Tracker.prototype.feed = function (t, lm, aspect) {
     if (t < this.lastT - 0.5) this.reset();   // 影片倒轉或重新開始
     this.lastT = t;
-    if (!lm) return;
+    if (!lm) { if (this.state === 'idle') this._emit('hint', 'person'); return; }
     var f = feat(t, lm, aspect || 1);
-    if (!f.ok) return;
+    if (!f.ok) { if (this.state === 'idle') this._emit('hint', f.miss || 'person'); return; }
     this.feedFeat(f);
   };
   Tracker.prototype.feedFeat = function (f) {
@@ -231,9 +250,10 @@
       if (m) {
         var first = this.state === 'idle';
         this.addr = m; this._set('address');
-        if (first) this._emit('address', addressReport(m));
+        this._emit(first ? 'address' : 'addressUpdate', addressReport(m));
         return;
       }
+      if (this.state === 'idle') this._emit('hint', this.why);
       if (this.state === 'address') {
         if (dist(f.hip, a.hip) > 0.15 * S) { this.addr = null; this._set('idle'); return; }
         if (dist(f.hands, a.hands) > o.startTol * S) {
@@ -246,14 +266,19 @@
     if (this.state === 'swing') {
       var sw = this.sw, rise = dist(f.hands, a.hands);
       if (rise > sw.maxRise) { sw.maxRise = rise; sw.tTop = t; }
-      if (dist(f.hip, a.hip) > 0.2 * S || t - sw.t0 > 6) { this.addr = null; this._set('idle'); return; }
+      if (dist(f.hip, a.hip) > 0.2 * S || t - sw.t0 > 6) {
+        var reached = sw.maxRise >= o.minRise * S;
+        this.addr = null; this._set('idle');
+        if (reached) this._emit('skip', 'noimpact');
+        return;
+      }
       if (sw.maxRise >= o.minRise * S) {
         if (t > sw.tTop && dist(f.hands, a.hands) < o.impactTol * S) {
           this._set('post'); sw.tImp = t; sw.follow = 0;
         }
       } else {
         var m2 = this._stillWindow(t);          // 只是晃桿，又回到站位
-        if (m2) { this.addr = m2; this._set('address'); }
+        if (m2) { this.addr = m2; this._set('address'); this._emit('addressUpdate', addressReport(m2)); }
       }
       return;
     }
@@ -266,12 +291,12 @@
         this.blockUntil = t; this.addr = null; this._set('idle');
         if (s2.follow >= o.minFollow * S) {
           var rep = analyzeSwing(frames, a, s2, o.view);
-          if (!rep) this._emit('skip', '量測失敗');
-          else if (rep.peakSpeed < o.minSpeed) this._emit('skip', '動作太慢，視為慢動作練習');
-          else if (rep.hipMove > 0.08 || Math.abs(rep.headDrop) > 0.15) this._emit('skip', '身體位置移動太多，不是揮桿');
+          if (!rep) this._emit('skip', 'fail');
+          else if (rep.hipMove > 0.08 || Math.abs(rep.headDrop) > 0.15) this._emit('skip', 'moved');
+          else if (rep.peakSpeed < o.minSpeed) this._emit('skip', 'slow');
           else this._emit('swing', rep);
         } else {
-          this._emit('skip', '沒有送桿，視為預備動作');
+          this._emit('skip', 'nofollow');
         }
       }
     }
@@ -291,7 +316,29 @@
   function viewOf(m) { return (Math.max(m.shW, m.hipW) / m.S) < VIEW_SPLIT ? 'dtl' : 'face'; }
   function addressReport(m) {
     var ballDir = (m.hands.x - m.hip.x) >= 0 ? 1 : -1;
-    return { view: viewOf(m), knee: chooseKnee(m), tilt: tiltOf(m, ballDir), S: m.S };
+    return { view: viewOf(m), knee: chooseKnee(m), tilt: tiltOf(m, ballDir), S: m.S,
+      upright: m.S / Math.max(1e-6, m.ank.y - m.hip.y),                // 耳到腳踝÷髖到腳踝：站直約 2.0，站位時較小
+      stance: Math.abs(m.lAnkX - m.rAnkX) / Math.max(1e-6, m.shW) };   // 雙腳距離÷肩寬（正面才有意義）
+  }
+
+  /* 站位鎖定時的判斷。view 可強制指定；setup=false 時只回報鎖定 */
+  function judgeAddress(a, cfg) {
+    cfg = cfg || {}; var L = Object.assign({}, LIMITS, cfg.limits || {});
+    var view = (cfg.view === 'dtl' || cfg.view === 'face') ? cfg.view : a.view;
+    var out = function (key, say, text) { return { key: key, ok: key === 'ok', say: say, text: text, view: view }; };
+    if (cfg.setup === false) return out('ok', '站位鎖定，可以揮桿', '站位已鎖定');
+    // 只是握著球桿站著、還沒擺出站位：先不評論
+    var standing = view === 'dtl' ? a.tilt < L.tiltStanding : (a.upright > L.uprightStanding || a.stance < L.stanceStanding);
+    if (standing) return out('standing', '', '已握好球桿，請擺出站位');
+    if (view === 'dtl') {
+      if (a.tilt < L.tiltAddrMin) return out('tilt', '上半身再往前傾一點', '上半身前傾 ' + a.tilt.toFixed(0) + '°，站得太直');
+      if (a.knee > L.kneeStraight) return out('kneeStraight', '膝蓋再彎一點', '膝蓋角度 ' + a.knee.toFixed(0) + '°，太直');
+      if (a.knee < L.kneeDeep) return out('kneeDeep', '膝蓋彎太多，站高一點', '膝蓋角度 ' + a.knee.toFixed(0) + '°，蹲太低');
+      return out('ok', '站位OK，可以揮桿', '站位 OK：前傾 ' + a.tilt.toFixed(0) + '°、膝蓋 ' + a.knee.toFixed(0) + '°');
+    }
+    if (a.stance < L.stanceNarrow) return out('narrow', '雙腳再站開一點', '雙腳距離只有肩寬的 ' + a.stance.toFixed(1) + ' 倍，太窄');
+    if (a.stance > L.stanceWide) return out('wide', '雙腳站太開了', '雙腳距離是肩寬的 ' + a.stance.toFixed(1) + ' 倍，太寬');
+    return out('ok', '站位OK，可以揮桿', '站位 OK：雙腳距離是肩寬的 ' + a.stance.toFixed(1) + ' 倍');
   }
 
   function tiltOf(f, ballDir) {  // 上半身前傾角（度），往球的方向為正
@@ -380,7 +427,9 @@
     backswingFast: 0.55, pause: 0.25,
     shiftFin: 0.06,
     kneeStraight: 170, kneeDeep: 138,
-    shiftImp: 0.03, swayTop: 0.05, headImp: 0.06
+    shiftImp: 0.03, swayTop: 0.05, headImp: 0.06,
+    stanceNarrow: 0.7, stanceWide: 2.0,
+    tiltStanding: 9, uprightStanding: 1.95, stanceStanding: 0.55
   };
 
   function judge(rep, cfg) {
@@ -444,7 +493,7 @@
     return { issues: issues, good: good, say: say };
   }
 
-  var api = { Tracker: Tracker, analyzeSwing: analyzeSwing, judge: judge, feat: feat, LIMITS: LIMITS, DEFAULTS: DEFAULTS, viewOf: viewOf };
+  var api = { Tracker: Tracker, analyzeSwing: analyzeSwing, judge: judge, judgeAddress: judgeAddress, feat: feat, LIMITS: LIMITS, DEFAULTS: DEFAULTS, viewOf: viewOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SwingCore = api;
 })(typeof self !== 'undefined' ? self : this);
 
@@ -484,7 +533,7 @@
   function initAudio() {
     try { var AC = window.AudioContext || window.webkitAudioContext; if (AC && !audio) audio = new AC(); if (audio && audio.state === 'suspended') audio.resume(); } catch (e) {}
     try { voices = speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = function () { voices = speechSynthesis.getVoices(); }; } catch (e) {}
-    speak('準備中');   // iPhone 需要在按下按鈕的當下先發聲一次，之後才能自動播報
+    if (!unlocked) { unlocked = true; speak('準備中'); }   // iPhone 需要在按下按鈕的當下先發聲一次，之後才能自動播報
   }
   function beep(freq, dur) {
     if (!audio) return;
@@ -492,11 +541,23 @@
       var t = audio.currentTime; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.15));
       o.start(t); o.stop(t + (dur || 0.15) + 0.02); } catch (e) {}
   }
-  function speak(text) {
-    if (!cfg.voice || !('speechSynthesis' in window)) return;
-    try { if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text); u.lang = 'zh-TW'; u.rate = 1.05;
+  var sayPri = -1, sayUntil = 0, unlocked = false;
+  // pri：2＝揮桿結果、1＝站位、0＝提示。正在講比較重要的內容時，不會被較不重要的打斷
+  function speak(text, pri) {
+    if (!text || !cfg.voice || !('speechSynthesis' in window)) return false;
+    pri = pri == null ? 2 : pri;
+    var now = performance.now();
+    if (now < sayUntil && pri < sayPri) return false;
+    try {
+      if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text); u.lang = 'zh-TW'; u.rate = 1.05;
       var v = voices.filter(function (x) { return /zh[-_]TW/i.test(x.lang); })[0] || voices.filter(function (x) { return /^zh/i.test(x.lang); })[0];
-      if (v) u.voice = v; speechSynthesis.speak(u); } catch (e) {}
+      if (v) u.voice = v;
+      sayPri = pri; sayUntil = now + 600 + text.length * 260;
+      u.onend = u.onerror = function () { if (sayPri === pri) sayUntil = 0; };
+      speechSynthesis.speak(u);
+      return true;
+    } catch (e) { return false; }
   }
 
   /* ---------- 姿勢偵測 ---------- */
@@ -509,22 +570,87 @@
     await pose.initialize();
   }
 
-  function setPill(text, cls) { var p = $('pill'); p.textContent = text; p.className = cls || ''; }
-  var STATE_TEXT = { idle: ['握桿站好不動', ''], address: ['已鎖定站位，可以揮桿', 'ready'], swing: ['揮桿中', 'swing'], post: ['分析中…', 'swing'] };
+  function setPill(text, cls) { var p = $('pill'); if (p.textContent !== text) p.textContent = text; if (p.className !== (cls || '')) p.className = cls || ''; }
+  function setStatus(text) { var e = $('statusLine'); if (e.textContent !== text) e.textContent = text; }
+  // 相機用實際時間；分析影片檔時用影片本身的時間，播放速度不影響判斷
+  var nowS = function () { return mode === 'file' ? frameT : performance.now() / 1000; };
+
+  /* 揮桿前的三個關卡：0 全身入鏡、1 雙手握桿、2 站位鎖定 */
+  var CK = ['全身入鏡', '雙手握桿', '站位鎖定'];
+  function setChecks(stage, problem, allOk) {
+    for (var i = 0; i < 3; i++) {
+      var el = $('ck' + i), cls = '', mark = '';
+      if (allOk || i < stage) { cls = 'ok'; mark = '✓ '; }
+      else if (i === stage && problem) { cls = 'no'; mark = '✕ '; }
+      if (el.className !== cls) el.className = cls;
+      if (el.textContent !== mark + CK[i]) el.textContent = mark + CK[i];
+    }
+  }
+  // 代碼 → [畫面文字, 語音, 卡在第幾關, 是否算問題]
+  var HINTS = {
+    person: ['找不到人，請全身入鏡', '看不到人，請站到鏡頭前', 0, true],
+    feet: ['看不到腳，手機退後一點或往下調', '看不到腳，請退後一點', 0, true],
+    head: ['看不到頭，手機退後一點或往上調', '看不到頭，請退後一點', 0, true],
+    small: ['人太小了，請靠近一點', '人太遠了，請靠近一點', 0, true],
+    hands: ['看不到雙手', '看不到雙手', 1, true],
+    handsHigh: ['握好球桿，雙手放到身體前方', '請握好球桿，雙手放到身體前方', 1, true],
+    grip: ['雙手要握在一起', '雙手要握在一起', 1, true],
+    moving: ['雙手就位，站好不動', '', 2, false],
+    wait: ['握桿站好不動', '', 2, false]
+  };
+  var SKIPS = { slow: '動作太慢，這次不算', nofollow: '沒有送桿，這次不算', moved: '身體移動太多，這次不算', noimpact: '沒有偵測到擊球，這次不算', fail: '量測失敗，這次不算' };
+  var hint = { code: '', since: 0, lastVoice: -1e9 }, everLocked = false, framedSaid = false;
+  var ad = { key: '', since: 0, spoken: '', lastVoice: -1e9, grip: false };
+
+  function onHint(code) {
+    var h = HINTS[code] || HINTS.wait, now = nowS();
+    if (code !== hint.code) { hint.code = code; hint.since = now; }
+    setPill(h[0], ''); setChecks(h[2], h[3], false);
+    // 第一次鎖定前：卡 4 秒就提醒。之後只提醒取景問題，而且間隔拉長，避免撿球時一直講話
+    var wait = everLocked ? 8 : 4, gap = everLocked ? 20 : 10;
+    if (h[1] && (!everLocked || h[2] === 0) && now - hint.since >= wait && now - hint.lastVoice >= gap) {
+      if (speak(h[1], 0)) { hint.lastVoice = now; if (h[2] === 0) framedSaid = false; }
+    }
+    // 取景過關時講一次（用後鏡頭時看不到螢幕，要靠聲音知道）
+    if (h[2] >= 1 && !framedSaid && now - hint.since >= 0.5) { if (speak('全身入鏡OK', 0)) framedSaid = true; }
+  }
+  function onAddress(a, first) {
+    var now = nowS();
+    if (first) { everLocked = true; framedSaid = true; beep(880, 0.15); ad = { key: '', since: now, spoken: '', lastVoice: ad.lastVoice, grip: false }; hint.code = ''; }
+    var j = SwingCore.judgeAddress(a, { view: cfg.view, setup: cfg.setup });
+    if (j.key !== ad.key) { ad.key = j.key; ad.since = now; }
+    setStatus(j.text);
+    if (j.key === 'standing') {
+      setPill('已握好球桿，請擺出站位', ''); setChecks(2, false, false);
+      if (cfg.setup && !ad.grip && now - ad.since >= 0.4 && speak('雙手就位', 1)) ad.grip = true;
+      return;
+    }
+    setChecks(3, false, true);
+    setPill(j.ok ? '站位OK，可以揮桿' : j.say, j.ok ? 'ready' : 'swing');
+    if (!cfg.setup) return;
+    // 判斷穩定 0.4 秒才講，同一個結論不重複講
+    if (now - ad.since >= 0.4 && j.key !== ad.spoken && now - ad.lastVoice >= 2) {
+      var text = ad.spoken && j.ok ? '好，站位OK' : (ad.grip ? '' : '雙手就位，') + j.say;
+      if (speak(text, 1)) { ad.spoken = j.key; ad.lastVoice = now; ad.grip = true; }
+    }
+  }
 
   function newTracker() {
     var topt = { view: cfg.view }; if (qs.get('still')) topt.stillWin = +qs.get('still');
     tracker = new SwingCore.Tracker(topt);
-    tracker.on('state', function (s) { var x = STATE_TEXT[s]; if (x) setPill(x[0], x[1]); });
-    tracker.on('address', function (a) {
-      beep(880, 0.15);
-      var dtl = cfg.view === 'dtl' || (cfg.view === 'auto' && a.view === 'dtl');
-      if (!dtl || !cfg.setup) return;
-      if (a.tilt < SwingCore.LIMITS.tiltAddrMin) speak('上半身再往前傾一點');
-      else if (a.knee > SwingCore.LIMITS.kneeStraight) speak('膝蓋再彎一點');
+    everLocked = false; framedSaid = false; hint = { code: '', since: 0, lastVoice: -1e9 }; ad = { key: '', since: 0, spoken: '', lastVoice: -1e9, grip: false };
+    tracker.on('state', function (s) {
+      if (s === 'swing') setPill('揮桿中', 'swing');
+      else if (s === 'post') setPill('分析中…', 'swing');
     });
+    tracker.on('hint', onHint);
+    tracker.on('address', function (a) { onAddress(a, true); });
+    tracker.on('addressUpdate', function (a) { onAddress(a, false); });
     tracker.on('swing', onSwing);
-    tracker.on('skip', function () {});
+    tracker.on('skip', function (code) {
+      var t = SKIPS[code] || SKIPS.fail; setStatus(t);
+      if (code === 'slow') speak(t, 1);
+    });
   }
 
   function onResults(r) {
@@ -544,7 +670,6 @@
         ctx.strokeStyle = 'rgba(255,107,94,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
       }
     }
-    if (tracker.state === 'idle') setPill(lm ? '握桿站好不動' : '找不到人，請全身入鏡', '');
     tracker.feed(frameT, lm, vw && vh ? vw / vh : 1);
     fpsN++; var now = performance.now();
     if (now - fpsT0 > 1000) {
@@ -580,7 +705,8 @@
     var ul = $('detail'); ul.innerHTML = '';
     j.issues.forEach(function (x) { var li = document.createElement('li'); li.className = 'bad'; li.textContent = x.text; ul.appendChild(li); });
     j.good.forEach(function (x) { var li = document.createElement('li'); li.className = 'good'; li.textContent = x; ul.appendChild(li); });
-    speak(j.say);
+    speak(j.say, 2);
+    setStatus('第 ' + history.length + ' 球已分析');
     renderTable();
   }
   function cmOf(v) { return (v * cfg.heightCm * 0.75).toFixed(0); }
@@ -627,7 +753,7 @@
       newTracker();
       speak(kind === 'camera' ? '開始檢測，握桿站好' : '開始分析影片');
       running = true; fpsT0 = performance.now(); fpsN = 0;
-      setPill('握桿站好不動', '');
+      setPill('握桿站好不動', ''); setChecks(0, false, false); setStatus('');
       await video.play();
       if (kind === 'file') video.onended = function () { tracker.flush(); setPill('影片結束，共 ' + history.length + ' 球', '');  };
       try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
