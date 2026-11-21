@@ -49,6 +49,9 @@
   .scroll { overflow-x:auto; }
   #err { color:var(--bad); font-size:14px; white-space:pre-wrap; margin-top:10px; }
   .note { color:var(--dim); font-size:13px; line-height:1.6; margin-top:8px; }
+  .lead { margin:0 0 6px; font-size:14px; line-height:1.6; }
+  #sheetBox { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  #sheetImg { display:block; height:62vh; max-height:560px; width:auto; }
   .bar { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   td button.small { padding:4px 10px; font-size:12px; }
   .checks { display:flex; gap:8px; margin-top:8px; }
@@ -63,13 +66,14 @@
 
 <section id="setup">
   <div class="panel">
+    <p class="lead"><b>現場即時提醒</b>：手機架好，每一球揮完用語音告訴你最該改的一件事。</p>
     <ol class="tips">
       <li>手機直立固定在腰部高度，全身從頭到腳都要入鏡。</li>
-      <li>背後角度：鏡頭在你身後，沿著目標線看出去。正面角度：鏡頭正對你的胸口。</li>
+      <li>背後角度：鏡頭在雙手的正後方，沿著目標線看出去。正面角度：鏡頭正對你的胸口。</li>
       <li>握桿站好不動約 1 秒，會依序確認「全身入鏡 → 雙手握桿 → 站位鎖定」，沒過關的會告訴你原因。</li>
-      <li>聽到「站位OK」或站位的修正提醒後就可以揮桿，要用正常速度。</li>
-      <li>揮完大約 1 秒後會語音播報這一球最該改的地方。</li>
+      <li>聽到「站位OK」或站位的修正提醒後，用正常速度揮桿。</li>
     </ol>
+    <p class="lead" style="margin-top:12px"><b>事後檢視</b>：每一球可以產生「關鍵畫面」，把站位、引桿、頂點、擊球、收桿五格排在一起，加上參考線，自己對照檢查球桿位置。想要更清楚的畫面，先用相機 App 以 60fps 錄影（不要用慢動作），再按「事後檢視」載入。</p>
   </div>
 
   <h2>設定</h2>
@@ -77,7 +81,7 @@
     <div class="row"><label for="cView">拍攝角度</label>
       <select id="cView"><option value="auto">自動判斷</option><option value="dtl">背後（沿目標線）</option><option value="face">正面</option></select></div>
     <div class="row"><label for="cFocus">本次練習重點</label>
-      <select id="cFocus"><option value="auto">自動（最重要的問題）</option><option value="head">頭部高度</option><option value="setup">站位前傾（背後）</option><option value="posture">提早起身（背後）</option><option value="shift">重心移轉（正面）</option><option value="sway">頭部左右晃動（正面）</option><option value="tempo">上桿節奏</option></select></div>
+      <select id="cFocus"><option value="auto">自動（最重要的問題）</option><option value="head">頭部高度</option><option value="setup">站位前傾（背後）</option><option value="posture">提早起身（背後）</option><option value="shift">重心移轉（正面）</option><option value="sway">頭部左右晃動（正面）</option><option value="takeaway">引桿三角形（正面）</option><option value="tempo">上桿節奏</option></select></div>
     <div class="row"><label for="cCam">鏡頭</label>
       <select id="cCam"><option value="environment">後鏡頭</option><option value="user">前鏡頭</option></select></div>
     <div class="row"><label for="cHeight">身高（公分）</label><input id="cHeight" type="number" min="120" max="220" value="170"></div>
@@ -90,11 +94,16 @@
   </div>
 
   <div class="btns">
-    <button id="bStart">開始檢測（開啟相機）</button>
-    <button id="bFile" class="ghost">用已拍好的影片測試</button>
+    <button id="bStart">現場即時提醒（開啟相機）</button>
+    <button id="bFile" class="ghost">事後檢視（載入已拍好的影片）</button>
     <input id="file" type="file" accept="video/*" class="hide">
   </div>
   <div id="err"></div>
+  <div id="logWrap" class="hide">
+    <h2>練習紀錄</h2>
+    <div class="panel scroll"><table><thead><tr><th>日期</th><th>角度</th><th>球數</th><th>頭下沉</th><th>站位前傾</th><th>重心移</th></tr></thead><tbody id="logBody"></tbody></table>
+      <div class="note">每次練習（3 球以上）結束時自動記一筆，只存在這支手機的瀏覽器裡。<a href="#" id="logClear" style="color:var(--dim)">清除</a></div></div>
+  </div>
   <p class="note">影像只在這支手機上處理，不會上傳。錄下的影片只暫存在這個網頁裡，關掉就消失，除非你自己按分享。第一次開啟需要從本站下載偵測模型（約 15 MB）。</p>
 </section>
 
@@ -125,6 +134,13 @@
     <button id="bData" class="ghost small">匯出偵測資料</button>
     <button id="bStop" class="ghost small">結束</button>
   </div>
+  <div id="review" class="hide">
+    <h2 id="sheetTitle">關鍵畫面</h2>
+    <div class="panel"><div id="sheetBox"><img id="sheetImg" alt="關鍵畫面"></div>
+      <div class="note">紅線＝站位時的頭頂高度。黃線＝該格的參考線，說明在每格下方。左右滑動可以看全部五格。</div>
+      <div class="bar"><button id="bSheetShare" class="ghost small">分享圖片</button><button id="bSheetClose" class="ghost small">關閉</button></div></div>
+  </div>
+  <video id="rv" playsinline webkit-playsinline muted preload="auto" style="position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
   <div id="err2" style="color:var(--bad);font-size:14px;white-space:pre-wrap;margin-top:10px"></div>
 </section>
 
@@ -132,7 +148,7 @@
 /* 揮桿檢測核心：姿勢關節點 → 自動偵測揮桿 → 量測 → 判斷。瀏覽器與 Node 共用。 */
 (function (root) {
   'use strict';
-  var K = { NOSE: 0, LEAR: 7, REAR: 8, LSH: 11, RSH: 12, LWR: 15, RWR: 16, LHIP: 23, RHIP: 24,
+  var K = { NOSE: 0, LEAR: 7, REAR: 8, LSH: 11, RSH: 12, LEL: 13, REL: 14, LWR: 15, RWR: 16, LHIP: 23, RHIP: 24,
     LKN: 25, RKN: 26, LAN: 27, RAN: 28, LHEEL: 29, RHEEL: 30, LTOE: 31, RTOE: 32 };
 
   function pt(lm, i, aspect) {
@@ -168,6 +184,7 @@
       shW: Math.abs(ls.x - rs.x), hipW: Math.abs(lh.x - rh.x),
       kneeL: angle(lh, lk, la), kneeR: angle(rh, rk, ra), kneeLv: Math.min(lh.v, lk.v, la.v), kneeRv: Math.min(rh.v, rk.v, ra.v),
       heelL: ltoe.y - lheel.y, heelR: rtoe.y - rheel.y,
+      elbowL: angle(ls, P(K.LEL), lw), elbowR: angle(rs, P(K.REL), rw),
       lAnkX: la.x, rAnkX: ra.x
     };
     var core = Math.min(ls.v, rs.v, lh.v, rh.v);
@@ -182,7 +199,7 @@
     return f;
   }
 
-  var NUMKEYS = ['wristGap', 'shW', 'hipW', 'kneeL', 'kneeR', 'kneeLv', 'kneeRv', 'heelL', 'heelR', 'lAnkX', 'rAnkX'];
+  var NUMKEYS = ['wristGap', 'shW', 'hipW', 'kneeL', 'kneeR', 'kneeLv', 'kneeRv', 'heelL', 'heelR', 'lAnkX', 'rAnkX', 'elbowL', 'elbowR'];
   var PTKEYS = ['hands', 'head', 'sh', 'hip', 'ank'];
   function medianFeat(fs) {
     var o = { t: fs[fs.length - 1].t };
@@ -257,7 +274,7 @@
 
   Tracker.prototype.feed = function (t, lm, aspect) {
     if (t < this.lastT - 0.5) this.reset();   // 影片倒轉或重新開始
-    this.lastT = t;
+    this.lastT = t; this.aspect = aspect || 1;
     if (!lm) { if (this.state === 'idle') this._emit('hint', 'person'); return; }
     var f = feat(t, lm, aspect || 1);
     if (!f.ok) { if (this.state === 'idle') this._emit('hint', f.miss || 'person'); return; }
@@ -325,6 +342,7 @@
         if (s2.follow >= o.minFollow * S) {
           this._vote(a);
           var rep = analyzeSwing(frames, a, s2, this.view(a));
+          if (rep) rep.aspect = this.aspect;
           if (!rep) this._emit('skip', 'fail');
           else if (rep.down < 0.08 || rep.backswing + rep.pause + rep.down < 0.45) this._emit('skip', 'unstable');
           else if (rep.hipMove > 0.08 || Math.abs(rep.headDrop) > 0.15) this._emit('skip', 'moved');
@@ -417,6 +435,21 @@
       riseTop: rise[iTopRaw] / S,
       kneeAddr: chooseKnee(a)
     };
+    // 引桿檢查點：雙手比站位高出身體尺度 8%（大約到腰的高度，桿身應該接近與地面平行）
+    var iTk = -1;
+    for (i = iStart; i <= iTopRaw; i++) if (a.hands.y - frames[i].hands.y >= 0.08 * S) { iTk = i; break; }
+    if (iTk < 0) iTk = Math.min(iTopRaw, iStart + 1);
+    var tk = frames[iTk];
+    rep.tk = {
+      elbowMin: Math.min(tk.elbowL, tk.elbowR),
+      elbowDrop: Math.max(a.elbowL - tk.elbowL, a.elbowR - tk.elbowR),   // 手肘比站位時多彎了幾度
+      shRatio: tk.shW / Math.max(1e-6, a.shW)                           // 肩寬比例：肩膀有轉，這個值會變小
+    };
+    // 關鍵畫面的時間與位置（事後檢視用）
+    var iMidTop = Math.round((p0 + p1) / 2), tFin = Math.min(frames[n - 1].t, tImp + 0.8);
+    var pos = function (f) { return { hands: f.hands, head: f.head, hip: f.hip, sh: f.sh }; };
+    rep.keys = { addr: Math.max(frames[0].t, tStart - 0.1), takeaway: tk.t, top: frames[iMidTop].t, impact: tImp, finish: tFin };
+    rep.geom = { addr: { hands: a.hands, head: a.head, hip: a.hip, sh: a.sh, ank: a.ank }, takeaway: pos(tk), top: pos(frames[iMidTop]), impact: pos(frames[iImp]) };
     // 擊球前後的畫面
     var near2 = frames.filter(function (f) { return f.t >= tImp - 0.12 && f.t <= tImp + 0.06; });
     if (!near2.length) near2 = [frames[iImp]];
@@ -473,6 +506,7 @@
     kneeStraight: 170, kneeDeep: 138,
     shiftImp: 0.03, swayTop: 0.05, headImp: 0.06,
     stanceNarrow: 0.7, stanceWide: 2.0,
+    tkElbowMin: 150, tkElbowDrop: 20, tkShRatio: 0.97,
     tiltStanding: 9, uprightStanding: 1.95, stanceStanding: 0.55
   };
 
@@ -512,6 +546,11 @@
         if (rep.swayTop > L.swayTop) add('sway', 3, true, '上桿時頭往後晃了' + cm(rep.swayTop) + '公分，頭留在球的上方', '上桿時頭部往後移了 ' + cm(rep.swayTop) + ' 公分');
         else if (rep.headImp > L.headImp) add('sway', 3, true, '擊球時頭往目標衝了，頭留在球的後方', '擊球時頭部往目標移了 ' + cm(rep.headImp) + ' 公分');
         else add('sway', 3, false, '', '', '頭部左右穩定');
+      }
+      if (on('takeaway') && rep.tk) {
+        if (rep.tk.elbowMin < L.tkElbowMin || rep.tk.elbowDrop > L.tkElbowDrop) add('takeaway', 3.5, true, '引桿時手肘彎了，雙臂保持伸直一起帶', '引桿時手肘彎到 ' + rep.tk.elbowMin.toFixed(0) + '°（比站位多彎 ' + Math.max(0, rep.tk.elbowDrop).toFixed(0) + '°），三角形沒有維持');
+        else if (rep.tk.shRatio > L.tkShRatio) add('takeaway', 3.5, true, '引桿只用手，肩膀要一起轉', '引桿時肩膀幾乎沒轉，只用手臂把桿帶上去');
+        else add('takeaway', 3.5, false, '', '', '引桿三角形有維持');
       }
       if (on('finish')) {
         add('finish', 5, rep.shiftFin < L.shiftFin, '收桿重心沒過去，身體要站到前腳上', '收桿時髖部只往目標移了 ' + Math.round(rep.shiftFin * cmPer) + ' 公分，重心沒有完全到前腳', '收桿重心有到前腳');
@@ -693,12 +732,12 @@
     if (!cfg.record || mode !== 'camera' || !stream || !window.MediaRecorder) return;
     try {
       var opt = { videoBitsPerSecond: 2500000 }; if (rec.mime) opt.mimeType = rec.mime;
-      var mr = new MediaRecorder(stream, opt), chunks = [], me = { mr: mr, keep: null, t0: performance.now() };
+      var mr = new MediaRecorder(stream, opt), chunks = [], me = { mr: mr, keep: null, t0: performance.now(), tStart: frameT };
       mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
       mr.onstop = function () {
         if (!me.keep) return;
         var type = (mr.mimeType || rec.mime || 'video/mp4').split(';')[0];
-        clips.push({ n: me.keep.n, skip: me.keep.skip, blob: new Blob(chunks, { type: type }), ext: type.indexOf('webm') >= 0 ? 'webm' : 'mp4' });
+        clips.push({ n: me.keep.n, skip: me.keep.skip, t0: me.tStart, blob: new Blob(chunks, { type: type }), ext: type.indexOf('webm') >= 0 ? 'webm' : 'mp4' });
         // 只留最近 15 球和最近 3 次「不算」的片段，避免占太多記憶體
         var sw = clips.filter(function (c) { return !c.skip; }), sk = clips.filter(function (c) { return c.skip; });
         clips = sw.slice(-15).concat(sk.slice(-3));
@@ -731,6 +770,113 @@
       cfg: { view: cfg.view, focus: cfg.focus, model: cfg.model, heightCm: cfg.heightCm }, spikes: tracker ? (tracker.spikes || 0) : 0,
       format: 'frames: [t_ms, then x*1000, y*1000, visibility*100 for each of the 33 pose landmarks]', events: dataLog };
     return new File([JSON.stringify(o)], 'swing-data-' + stamp() + '.txt', { type: 'text/plain' });
+  }
+
+  /* ---------- 關鍵畫面（事後檢視） ---------- */
+  var rv = $('rv'), fileUrl = '', sheetBlob = null, sheetBusy = false;
+  var KEYS = ['addr', 'takeaway', 'top', 'impact', 'finish'];
+  var KEYNAME = { addr: '① 站位', takeaway: '② 引桿（雙手到腰）', top: '③ 頂點', impact: '④ 擊球', finish: '⑤ 收桿' };
+  var ASK = {
+    dtl: { addr: '上半身有從髖部前傾嗎？雙臂是否自然下垂？', takeaway: '這時桿身應該與地面平行，桿頭要擋住雙手。桿頭在黃線靠身體後方那一側＝太內側。', top: '桿身有沒有橫在背後？應該大致指向目標方向。', impact: '頭有沒有掉到紅線下面？臀部有沒有往球的方向頂？', finish: '後腳尖點地、皮帶扣朝向目標、身體站得穩嗎？' },
+    face: { addr: '重心平均在兩腳嗎？雙手在身體中線附近？', takeaway: '黃線是肩膀到雙手的連線。雙臂有沒有保持伸直、和肩膀一起轉？', top: '黃線是站位時頭的位置。頭有沒有晃出去？前手臂是否伸直？', impact: '黃線是站位時髖部的位置。髖部應該已經超過黃線、往目標移。', finish: '重心是否完全在前腳、後腳跟離地？' }
+  };
+  function waitEv(el, ev, ms) {
+    return new Promise(function (res) {
+      var done = false, f = function () { if (done) return; done = true; el.removeEventListener(ev, f); res(true); };
+      el.addEventListener(ev, f);
+      setTimeout(function () { if (done) return; done = true; el.removeEventListener(ev, f); res(false); }, ms);
+    });
+  }
+  function wrapText(c, text, x, y, w, lh) {
+    var line = '', i;
+    for (i = 0; i < text.length; i++) { var t = line + text[i]; if (c.measureText(t).width > w && line && '，。、？！）'.indexOf(text[i]) < 0) { c.fillText(line, x, y); y += lh; line = text[i]; } else line = t; }
+    if (line) c.fillText(line, x, y);
+    return y + lh;
+  }
+  async function makeSheet(h, btn) {
+    if (sheetBusy) return; sheetBusy = true;
+    var label = btn ? btn.textContent : ''; if (btn) btn.textContent = '…';
+    try {
+      var r = h.rep, url, tmap, made = '';
+      if (mode === 'file') { url = fileUrl; tmap = function (t) { return t; }; }
+      else {
+        var c = clips.filter(function (x) { return !x.skip && x.n === h.n; })[0];
+        if (!c) throw new Error('這一球的錄影已經不在了（只保留最近 15 球）');
+        url = made = URL.createObjectURL(c.blob); tmap = function (t) { return (t - c.t0) * TSCALE; };
+      }
+      rv.src = url; rv.load();
+      try { await rv.play(); } catch (e) {} rv.pause();   // iPhone 要先播放一下才會載入畫面
+      if (!rv.videoWidth) await waitEv(rv, 'loadeddata', 6000);
+      if (!rv.videoWidth) throw new Error('無法讀取這段影片');
+      if (!isFinite(rv.duration)) { rv.currentTime = 1e7; await waitEv(rv, 'seeked', 4000); }
+      var vw = rv.videoWidth, vh = rv.videoHeight, S = r.S * vh, g = r.geom, face = r.view === 'face';
+      var ballDir = (g.addr.hands.x - g.addr.hip.x) >= 0 ? 1 : -1;
+      // 裁切範圍：以站位為準，上方多留空間給球桿
+      var sy = (g.addr.head.y - 0.50 * r.S) * vh, sh = (g.addr.ank.y + 0.12 * r.S) * vh - sy, ratio = face ? 0.9 : 0.8, sw = sh * ratio;
+      var sx = g.addr.hip.x * vh + (face ? 0 : 0.12 * S * ballDir) - sw / 2;
+      sx = sw <= vw ? Math.max(0, Math.min(vw - sw, sx)) : (vw - sw) / 2;   // 盡量不要裁到畫面外
+      var CH = 480, CW = Math.round(CH * ratio), HEAD = 64, FOOT = 104, k = CH / sh;
+      var cv = document.createElement('canvas'); cv.width = CW * 5; cv.height = HEAD + CH + FOOT; var c2 = cv.getContext('2d');
+      c2.fillStyle = '#0f1512'; c2.fillRect(0, 0, cv.width, cv.height);
+      var font = '-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+      var X = function (px) { return (px - sx) * k; }, Y = function (py) { return (py - sy) * k; };
+      var cm = function (v) { return (v * cfg.heightCm * 0.75).toFixed(0); };
+      for (var i = 0; i < 5; i++) {
+        var key = KEYS[i], ox = i * CW, t = Math.max(0, tmap(r.keys[key]));
+        if (isFinite(rv.duration)) t = Math.min(t, Math.max(0, rv.duration - 0.05));
+        rv.currentTime = t; await waitEv(rv, 'seeked', 5000); await new Promise(function (res) { setTimeout(res, 90); });
+        c2.save(); c2.beginPath(); c2.rect(ox, HEAD, CW, CH); c2.clip();
+        c2.drawImage(rv, 0, 0, vw, vh, ox + X(0), HEAD + Y(0), vw * k, vh * k);
+        var line = function (x1, y1, x2, y2, col) { c2.strokeStyle = col; c2.lineWidth = 3; c2.beginPath(); c2.moveTo(ox + x1, HEAD + y1); c2.lineTo(ox + x2, HEAD + y2); c2.stroke(); };
+        var hy = Y((g.addr.head.y - 0.10 * r.S) * vh); line(0, hy, CW, hy, 'rgba(255,90,80,.95)');
+        var yel = 'rgba(255,214,64,.95)';
+        if (key === 'takeaway' && !face) { var hx = X(g.takeaway.hands.x * vh); line(hx, 0, hx, CH, yel); }
+        if (key === 'takeaway' && face) line(X(g.takeaway.sh.x * vh), Y(g.takeaway.sh.y * vh), X(g.takeaway.hands.x * vh), Y(g.takeaway.hands.y * vh), yel);
+        if (key === 'top' && face) { var tx = X(g.addr.head.x * vh); line(tx, 0, tx, CH, yel); }
+        if (key === 'impact' && face) { var ix = X(g.addr.hip.x * vh); line(ix, 0, ix, CH, yel); }
+        c2.fillStyle = 'rgba(0,0,0,.6)'; c2.fillRect(ox, HEAD, CW, 34);
+        c2.fillStyle = '#fff'; c2.font = '600 19px ' + font; c2.textBaseline = 'middle'; c2.fillText(KEYNAME[key], ox + 10, HEAD + 17);
+        c2.restore();
+        c2.fillStyle = '#c8d6cc'; c2.font = '15px ' + font; c2.textBaseline = 'top';
+        wrapText(c2, ASK[face ? 'face' : 'dtl'][key], ox + 10, HEAD + CH + 10, CW - 20, 21);
+        if (i) { c2.fillStyle = '#0f1512'; c2.fillRect(ox - 1, HEAD, 2, CH); }
+      }
+      c2.fillStyle = '#eef3ef'; c2.font = '600 24px ' + font; c2.textBaseline = 'middle';
+      var d = new Date(), head = '第 ' + h.n + ' 球 · ' + (face ? '正面' : '背後') + '角度 · ' + d.toLocaleDateString('zh-TW') + '　頭下沉 ' + cm(r.headDrop) + ' cm' +
+        (face ? '　重心移 ' + cm(r.shiftImp) + ' cm' : '　站位前傾 ' + r.tiltAddr.toFixed(0) + '°　擊球前傾 ' + r.tiltImp.toFixed(0) + '°') + '　上桿 ' + r.backswing.toFixed(2) + ' s';
+      c2.fillText(head, 14, 22);
+      c2.fillStyle = '#ffb84d'; c2.font = '18px ' + font; c2.fillText('提醒：' + h.j.say, 14, 48);
+      sheetBlob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.9); });
+      sheetBlob.sheetName = 'swing-' + (h.n < 10 ? '0' : '') + h.n + '-keyframes.jpg';
+      var img = $('sheetImg'); if (img.src && img.src.indexOf('blob:') === 0) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(sheetBlob);
+      $('sheetTitle').textContent = '關鍵畫面：第 ' + h.n + ' 球'; $('review').classList.remove('hide');
+      $('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (made) setTimeout(function () { URL.revokeObjectURL(made); }, 4000);
+    } catch (e) { setStatus('關鍵畫面產生失敗：' + ((e && e.message) || e)); }
+    if (btn) btn.textContent = label; sheetBusy = false;
+  }
+
+  /* ---------- 練習紀錄（跨次練習的趨勢） ---------- */
+  function med(arr) { var v = arr.filter(function (x) { return x != null && !isNaN(x); }).sort(function (x, y) { return x - y; }); return v.length ? v[Math.floor(v.length / 2)] : null; }
+  function loadLog() { try { return JSON.parse(localStorage.getItem('swinglog') || '[]'); } catch (e) { return []; } }
+  function saveSession() {
+    if (history.length < 3) return;
+    var reps = history.map(function (h) { return h.rep; }), face = reps.filter(function (r) { return r.view === 'face'; }).length > reps.length / 2;
+    var same = reps.filter(function (r) { return (r.view === 'face') === face; });
+    var e = { when: Date.now(), view: face ? 'face' : 'dtl', n: history.length, src: mode,
+      head: med(same.map(function (r) { return r.headDrop * cfg.heightCm * 0.75; })),
+      tilt: face ? null : med(same.map(function (r) { return r.tiltAddr; })),
+      shift: face ? med(same.map(function (r) { return r.shiftImp * cfg.heightCm * 0.75; })) : null };
+    try { var log = loadLog(); log.push(e); localStorage.setItem('swinglog', JSON.stringify(log.slice(-40))); } catch (err) {}
+  }
+  function renderLog() {
+    var log = loadLog(); $('logWrap').classList.toggle('hide', !log.length); if (!log.length) return;
+    var f = function (v, u) { return v == null ? '–' : v.toFixed(0) + u; };
+    $('logBody').innerHTML = log.slice(-10).reverse().map(function (e) {
+      var d = new Date(e.when);
+      return '<tr><td>' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes() + '</td><td>' + (e.view === 'face' ? '正面' : '背後') + '</td><td>' + e.n + '</td><td>' + f(e.head, ' cm') + '</td><td>' + f(e.tilt, '°') + '</td><td>' + f(e.shift, ' cm') + '</td></tr>';
+    }).join('');
   }
 
   function newTracker() {
@@ -767,7 +913,7 @@
         ctx.stroke();
       }
       if (tracker.addr) { // 站位頭部高度參考線
-        var a0 = tracker.addr, y = (a0.head.y - 0.06 * a0.S) * ch;
+        var a0 = tracker.addr, y = (a0.head.y - 0.10 * a0.S) * ch;
         ctx.strokeStyle = 'rgba(255,107,94,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
       }
     }
@@ -831,23 +977,24 @@
     $('tbody').innerHTML = history.slice().reverse().map(function (h) {
       var bad = {}; h.j.issues.forEach(function (x) { bad[x.key] = 1; });
       return '<tr><td>' + h.n + '</td>' + cols.map(function (c) { return '<td class="' + (bad[c[3]] ? 'flag' : '') + '">' + fmt(h.rep[c[1]], c[2]) + '</td>'; }).join('') +
-        '<td>' + (has[h.n] ? '<button class="ghost small" data-clip="' + h.n + '">影片</button>' : '') + '</td></tr>';
+        '<td>' + ((has[h.n] || mode === 'file') ? '<button class="ghost small" data-sheet="' + h.n + '">畫面</button> ' : '') +
+        (has[h.n] ? '<button class="ghost small" data-clip="' + h.n + '">影片</button>' : '') + '</td></tr>';
     }).join('');
     $('count').textContent = '（' + history.length + ' 球）';
     var avg = history.reduce(function (s, h) { return s + h.rep.headDrop; }, 0) / history.length;
     $('avg').textContent = '平均頭部下沉 ' + cmOf(avg) + ' 公分。數值由畫面估算，適合看每一球之間的變化。';
   }
   function exportText() {
-    var lines = ['揮桿紀錄 ' + new Date().toLocaleString('zh-TW'), '#\t角度\t頭下沉cm\t站位前傾°\t擊球前傾°\t臀部前頂cm\t重心移cm\t頭後晃cm\t上桿s\t停頓s\t下桿s\t提醒'];
+    var lines = ['揮桿紀錄 ' + new Date().toLocaleString('zh-TW'), '#\t角度\t頭下沉cm\t站位前傾°\t擊球前傾°\t臀部前頂cm\t重心移cm\t頭後晃cm\t引桿手肘°\t引桿肩寬比\t上桿s\t停頓s\t下桿s\t提醒'];
     history.forEach(function (h) { var r = h.rep; var c = function (v) { return v == null ? '' : cmOf(v); };
-      lines.push([h.n, r.view === 'dtl' ? '背後' : '正面', c(r.headDrop), r.tiltAddr == null ? '' : r.tiltAddr.toFixed(0), r.tiltImp == null ? '' : r.tiltImp.toFixed(0), c(r.hipFwd), c(r.shiftImp), c(r.swayTop), r.backswing.toFixed(2), r.pause.toFixed(2), r.down.toFixed(2), h.j.say].join('\t')); });
+      lines.push([h.n, r.view === 'dtl' ? '背後' : '正面', c(r.headDrop), r.tiltAddr == null ? '' : r.tiltAddr.toFixed(0), r.tiltImp == null ? '' : r.tiltImp.toFixed(0), c(r.hipFwd), c(r.shiftImp), c(r.swayTop), r.tk && r.view === 'face' ? r.tk.elbowMin.toFixed(0) : '', r.tk && r.view === 'face' ? r.tk.shRatio.toFixed(2) : '', r.backswing.toFixed(2), r.pause.toFixed(2), r.down.toFixed(2), h.j.say].join('\t')); });
     return lines.join('\n');
   }
 
   /* ---------- 開始／結束 ---------- */
   async function begin(kind, file) {
     $('err').textContent = ''; $('err2').textContent = '';
-    readCfg(); initAudio(); mode = kind; history = []; rawBuf = []; dataLog = []; clips = []; rec.mime = pickMime();
+    readCfg(); initAudio(); mode = kind; history = []; rawBuf = []; dataLog = []; clips = []; rec.mime = pickMime(); $('review').classList.add('hide');
     $('setup').classList.add('hide'); $('live').classList.remove('hide');
     $('say').textContent = '等待第一球'; $('say').className = ''; $('detail').innerHTML = ''; $('tbody').innerHTML = ''; $('thead').innerHTML = ''; $('count').textContent = ''; $('avg').textContent = '';
     setPill('載入偵測模型…', '');
@@ -857,17 +1004,18 @@
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: cfg.cam }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } } });
         video.srcObject = stream;
       } else {
-        video.srcObject = null; video.src = typeof file === 'string' ? file : URL.createObjectURL(file);
+        video.srcObject = null; if (fileUrl && fileUrl.indexOf('blob:') === 0) URL.revokeObjectURL(fileUrl); fileUrl = typeof file === 'string' ? file : URL.createObjectURL(file); video.src = fileUrl;
         video.playbackRate = +(qs.get('rate') || 1);
       }
       await new Promise(function (res, rej) { video.onloadedmetadata = res; video.onerror = function () { rej(new Error('影片無法播放，請換成 mp4（H.264）格式')); }; });
       await initPose();
       newTracker();
       speak(kind === 'camera' ? '開始檢測，握桿站好' : '開始分析影片');
+      if (kind === 'file') setStatus('影片會從頭播放一次並逐球分析');
       running = true; fpsT0 = performance.now(); fpsN = 0;
       setPill('握桿站好不動', ''); setChecks(0, false, false); setStatus('');
       await video.play();
-      if (kind === 'file') video.onended = function () { tracker.flush(); setPill('影片結束，共 ' + history.length + ' 球', '');  };
+      if (kind === 'file') video.onended = function () { tracker.flush(); setPill('影片結束，共 ' + history.length + ' 球', ''); setStatus('按每一球右邊的「畫面」可以看關鍵畫面'); };
       try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
       schedule();
     } catch (e) {
@@ -876,7 +1024,8 @@
     }
   }
   function end() {
-    running = false; recStop(null);
+    if (running) saveSession();
+    running = false; recStop(null); renderLog();
     try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
     stream = null; try { video.pause(); } catch (e) {}
     try { if (wake) wake.release(); } catch (e) {} wake = null;
@@ -898,9 +1047,15 @@
     else window.prompt('複製下列文字', t);
   };
   $('tbody').addEventListener('click', function (e) {
-    var n = e.target && e.target.getAttribute && e.target.getAttribute('data-clip'); if (!n) return;
+    var g = e.target && e.target.getAttribute ? e.target : null; if (!g) return;
+    var sn = g.getAttribute('data-sheet');
+    if (sn) { var h = history.filter(function (x) { return String(x.n) === sn; })[0]; if (h) makeSheet(h, g); return; }
+    var n = g.getAttribute('data-clip'); if (!n) return;
     var c = clips.filter(function (x) { return !x.skip && String(x.n) === n; })[0]; if (c) shareFiles([clipFile(c)]);
   });
+  $('bSheetShare').onclick = function () { if (sheetBlob) shareFiles([new File([sheetBlob], sheetBlob.sheetName, { type: 'image/jpeg' })]); };
+  $('bSheetClose').onclick = function () { $('review').classList.add('hide'); };
+  $('logClear').onclick = function (e) { e.preventDefault(); try { localStorage.removeItem('swinglog'); } catch (err) {} renderLog(); };
   $('bClips').onclick = function () {
     if (!clips.length) { setStatus(mode === 'camera' ? '還沒有錄到影片' : '分析影片檔時不會另外錄影'); return; }
     shareFiles(clips.map(clipFile));
@@ -908,7 +1063,7 @@
   $('bData').onclick = function () { if (!dataLog.length) { setStatus('還沒有可匯出的資料'); return; } shareFiles([dataFile()]); };
   // 站位等太久時重新開始錄，讓每段影片保持精簡
   setInterval(function () { if (rec.cur && tracker && tracker.state === 'address' && performance.now() - rec.cur.t0 > 10000 * TSCALE) recStart(); }, 1000);
-  loadCfg();
+  loadCfg(); renderLog();
 })();
 </script>
 </body>
