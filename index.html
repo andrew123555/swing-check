@@ -91,6 +91,8 @@
     <div class="row"><label for="cSetup">站位檢查（揮桿前提醒）</label><input id="cSetup" type="checkbox" checked></div>
     <div class="row"><label for="cPause">檢查頂點停頓</label><input id="cPause" type="checkbox" checked></div>
     <div class="row"><label for="cRecord">錄下每一球（可分享出去請人分析）</label><input id="cRecord" type="checkbox" checked></div>
+    <div class="row"><label for="cQuality">錄影畫質</label>
+      <select id="cQuality"><option value="hd">高（1080p）</option><option value="sd">標準（720p，較快）</option></select></div>
   </div>
 
   <div class="btns">
@@ -115,7 +117,7 @@
   </div>
   <div class="checks"><span id="ck0">全身入鏡</span><span id="ck1">雙手握桿</span><span id="ck2">站位鎖定</span></div>
   <div id="statusLine" class="note"></div>
-  <div id="slow" class="note hide" style="color:var(--warn)">偵測速度太慢，快速的下桿可能抓不到。請按「結束」，把偵測模型改成「輕量」再試一次。</div>
+  <div id="slow" class="note hide" style="color:var(--warn)">偵測速度太慢，快速的下桿可能抓不到。請按「結束」，把錄影畫質改成「標準」或把偵測模型改成「輕量」再試一次。</div>
   <video id="video" playsinline webkit-playsinline muted autoplay style="position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>
 
   <div id="result" class="panel">
@@ -599,7 +601,7 @@
   window.addEventListener('unhandledrejection', function (e) { showErr(e.reason); });
 
   /* ---------- 設定 ---------- */
-  var FIELDS = { cView: 'view', cFocus: 'focus', cCam: 'cam', cHeight: 'heightCm', cModel: 'model', cVoice: 'voice', cPause: 'pause', cSetup: 'setup', cRecord: 'record' };
+  var FIELDS = { cView: 'view', cFocus: 'focus', cCam: 'cam', cHeight: 'heightCm', cModel: 'model', cVoice: 'voice', cPause: 'pause', cSetup: 'setup', cRecord: 'record', cQuality: 'quality' };
   function loadCfg() {
     try { var s = JSON.parse(localStorage.getItem('swingcfg') || '{}');
       Object.keys(FIELDS).forEach(function (id) { var k = FIELDS[id], el = $(id); if (s[k] == null) return;
@@ -731,16 +733,16 @@
     recStop(null);
     if (!cfg.record || mode !== 'camera' || !stream || !window.MediaRecorder) return;
     try {
-      var opt = { videoBitsPerSecond: 2500000 }; if (rec.mime) opt.mimeType = rec.mime;
+      var hd = cfg.quality !== 'sd', opt = { videoBitsPerSecond: hd ? 12000000 : 4000000 }; if (rec.mime) opt.mimeType = rec.mime;
       var mr = new MediaRecorder(stream, opt), chunks = [], me = { mr: mr, keep: null, t0: performance.now(), tStart: frameT };
       mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
       mr.onstop = function () {
         if (!me.keep) return;
         var type = (mr.mimeType || rec.mime || 'video/mp4').split(';')[0];
         clips.push({ n: me.keep.n, skip: me.keep.skip, t0: me.tStart, blob: new Blob(chunks, { type: type }), ext: type.indexOf('webm') >= 0 ? 'webm' : 'mp4' });
-        // 只留最近 15 球和最近 3 次「不算」的片段，避免占太多記憶體
+        // 只留最近幾球和最近 2 次「不算」的片段，避免占太多記憶體（高畫質檔案大，留得少一點）
         var sw = clips.filter(function (c) { return !c.skip; }), sk = clips.filter(function (c) { return c.skip; });
-        clips = sw.slice(-15).concat(sk.slice(-3));
+        clips = sw.slice(cfg.quality !== 'sd' ? -8 : -15).concat(sk.slice(-2));
         renderTable();
       };
       mr.start(); rec.cur = me;
@@ -801,7 +803,7 @@
       if (mode === 'file') { url = fileUrl; tmap = function (t) { return t; }; }
       else {
         var c = clips.filter(function (x) { return !x.skip && x.n === h.n; })[0];
-        if (!c) throw new Error('這一球的錄影已經不在了（只保留最近 15 球）');
+        if (!c) throw new Error('這一球的錄影已經不在了（只保留最近幾球）');
         url = made = URL.createObjectURL(c.blob); tmap = function (t) { return (t - c.t0) * TSCALE; };
       }
       rv.src = url; rv.load();
@@ -815,7 +817,8 @@
       var sy = (g.addr.head.y - 0.50 * r.S) * vh, sh = (g.addr.ank.y + 0.12 * r.S) * vh - sy, ratio = face ? 0.9 : 0.8, sw = sh * ratio;
       var sx = g.addr.hip.x * vh + (face ? 0 : 0.12 * S * ballDir) - sw / 2;
       sx = sw <= vw ? Math.max(0, Math.min(vw - sw, sx)) : (vw - sw) / 2;   // 盡量不要裁到畫面外
-      var CH = 480, CW = Math.round(CH * ratio), HEAD = 64, FOOT = 104, k = CH / sh;
+      var F = sh >= 900 ? 1.5 : 1;   // 來源夠清楚時，把圖做大一點
+      var CH = Math.round(480 * F), CW = Math.round(CH * ratio), HEAD = Math.round(64 * F), FOOT = Math.round(104 * F), k = CH / sh;
       var cv = document.createElement('canvas'); cv.width = CW * 5; cv.height = HEAD + CH + FOOT; var c2 = cv.getContext('2d');
       c2.fillStyle = '#0f1512'; c2.fillRect(0, 0, cv.width, cv.height);
       var font = '-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
@@ -827,26 +830,26 @@
         rv.currentTime = t; await waitEv(rv, 'seeked', 5000); await new Promise(function (res) { setTimeout(res, 90); });
         c2.save(); c2.beginPath(); c2.rect(ox, HEAD, CW, CH); c2.clip();
         c2.drawImage(rv, 0, 0, vw, vh, ox + X(0), HEAD + Y(0), vw * k, vh * k);
-        var line = function (x1, y1, x2, y2, col) { c2.strokeStyle = col; c2.lineWidth = 3; c2.beginPath(); c2.moveTo(ox + x1, HEAD + y1); c2.lineTo(ox + x2, HEAD + y2); c2.stroke(); };
+        var line = function (x1, y1, x2, y2, col) { c2.strokeStyle = col; c2.lineWidth = 3 * F; c2.beginPath(); c2.moveTo(ox + x1, HEAD + y1); c2.lineTo(ox + x2, HEAD + y2); c2.stroke(); };
         var hy = Y((g.addr.head.y - 0.10 * r.S) * vh); line(0, hy, CW, hy, 'rgba(255,90,80,.95)');
         var yel = 'rgba(255,214,64,.95)';
         if (key === 'takeaway' && !face) { var hx = X(g.takeaway.hands.x * vh); line(hx, 0, hx, CH, yel); }
         if (key === 'takeaway' && face) line(X(g.takeaway.sh.x * vh), Y(g.takeaway.sh.y * vh), X(g.takeaway.hands.x * vh), Y(g.takeaway.hands.y * vh), yel);
         if (key === 'top' && face) { var tx = X(g.addr.head.x * vh); line(tx, 0, tx, CH, yel); }
         if (key === 'impact' && face) { var ix = X(g.addr.hip.x * vh); line(ix, 0, ix, CH, yel); }
-        c2.fillStyle = 'rgba(0,0,0,.6)'; c2.fillRect(ox, HEAD, CW, 34);
-        c2.fillStyle = '#fff'; c2.font = '600 19px ' + font; c2.textBaseline = 'middle'; c2.fillText(KEYNAME[key], ox + 10, HEAD + 17);
+        c2.fillStyle = 'rgba(0,0,0,.6)'; c2.fillRect(ox, HEAD, CW, 34 * F);
+        c2.fillStyle = '#fff'; c2.font = '600 ' + Math.round(19 * F) + 'px ' + font; c2.textBaseline = 'middle'; c2.fillText(KEYNAME[key], ox + 10 * F, HEAD + 17 * F);
         c2.restore();
-        c2.fillStyle = '#c8d6cc'; c2.font = '15px ' + font; c2.textBaseline = 'top';
-        wrapText(c2, ASK[face ? 'face' : 'dtl'][key], ox + 10, HEAD + CH + 10, CW - 20, 21);
+        c2.fillStyle = '#c8d6cc'; c2.font = Math.round(15 * F) + 'px ' + font; c2.textBaseline = 'top';
+        wrapText(c2, ASK[face ? 'face' : 'dtl'][key], ox + 10 * F, HEAD + CH + 10 * F, CW - 20 * F, 21 * F);
         if (i) { c2.fillStyle = '#0f1512'; c2.fillRect(ox - 1, HEAD, 2, CH); }
       }
-      c2.fillStyle = '#eef3ef'; c2.font = '600 24px ' + font; c2.textBaseline = 'middle';
+      c2.fillStyle = '#eef3ef'; c2.font = '600 ' + Math.round(24 * F) + 'px ' + font; c2.textBaseline = 'middle';
       var d = new Date(), head = '第 ' + h.n + ' 球 · ' + (face ? '正面' : '背後') + '角度 · ' + d.toLocaleDateString('zh-TW') + '　頭下沉 ' + cm(r.headDrop) + ' cm' +
         (face ? '　重心移 ' + cm(r.shiftImp) + ' cm' : '　站位前傾 ' + r.tiltAddr.toFixed(0) + '°　擊球前傾 ' + r.tiltImp.toFixed(0) + '°') + '　上桿 ' + r.backswing.toFixed(2) + ' s';
-      c2.fillText(head, 14, 22);
-      c2.fillStyle = '#ffb84d'; c2.font = '18px ' + font; c2.fillText('提醒：' + h.j.say, 14, 48);
-      sheetBlob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.9); });
+      c2.fillText(head, 14 * F, 22 * F);
+      c2.fillStyle = '#ffb84d'; c2.font = Math.round(18 * F) + 'px ' + font; c2.fillText('提醒：' + h.j.say, 14 * F, 48 * F);
+      sheetBlob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.92); });
       sheetBlob.sheetName = 'swing-' + (h.n < 10 ? '0' : '') + h.n + '-keyframes.jpg';
       var img = $('sheetImg'); if (img.src && img.src.indexOf('blob:') === 0) URL.revokeObjectURL(img.src);
       img.src = URL.createObjectURL(sheetBlob);
@@ -1001,7 +1004,8 @@
     try {
       if (kind === 'camera') {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('這個瀏覽器無法開啟相機。請用 Safari 開啟 https 網址。');
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: cfg.cam }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } } });
+        var hd = cfg.quality !== 'sd';
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: cfg.cam }, width: { ideal: hd ? 1920 : 1280 }, height: { ideal: hd ? 1080 : 720 }, frameRate: { ideal: 60 } } });
         video.srcObject = stream;
       } else {
         video.srcObject = null; if (fileUrl && fileUrl.indexOf('blob:') === 0) URL.revokeObjectURL(fileUrl); fileUrl = typeof file === 'string' ? file : URL.createObjectURL(file); video.src = fileUrl;
@@ -1014,6 +1018,7 @@
       if (kind === 'file') setStatus('影片會從頭播放一次並逐球分析');
       running = true; fpsT0 = performance.now(); fpsN = 0;
       setPill('握桿站好不動', ''); setChecks(0, false, false); setStatus('');
+      if (kind === 'camera') { try { var ts = stream.getVideoTracks()[0].getSettings(); setStatus('相機畫質 ' + ts.width + '×' + ts.height + (ts.frameRate ? ' · ' + Math.round(ts.frameRate) + ' fps' : '')); } catch (e) {} }
       await video.play();
       if (kind === 'file') video.onended = function () { tracker.flush(); setPill('影片結束，共 ' + history.length + ' 球', ''); setStatus('按每一球右邊的「畫面」可以看關鍵畫面'); };
       try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
